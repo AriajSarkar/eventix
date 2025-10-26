@@ -10,6 +10,7 @@ readme = "README.md"
 homepage = "https://github.com/AriajSarkar/eventix"
 keywords = ["calendar", "recurrence", "icalendar", "ics", "timezone"]
 categories = ["date-and-time"]
+exclude = ["usage-examples/"]
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }

@@ -10,6 +10,7 @@ Cargo.lock
 *.swp
 *.swo
 *~
+copilot-instructions.md
 
 # OS
 .DS_Store
@@ -20,3 +21,6 @@ Thumbs.db
 *.json
 work_calendar.ics
 calendar.ics
+
+# Usage examples (uses published crate)
+/usage-examples/
