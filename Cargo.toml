@@ -1,6 +1,6 @@
 [package]
 name = "eventix"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Raj Sarkar <ariajsarkar@gmail.com>"]
 description = "High-level calendar & recurrence crate with timezone-aware scheduling, exceptions, and ICS import/export"

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
-use icalendar::{Calendar as ICalendar, Component, Event as IEvent, EventLike};
+use icalendar::{Calendar as ICalendar, Component, Event as IEvent, EventLike, Property};
 use crate::calendar::Calendar;
 use crate::event::Event;
 use crate::error::{EventixError, Result};
@@ -130,11 +130,32 @@ fn event_to_ical(event: &Event) -> Result<IEvent> {
         ical_event.location(loc);
     }
     
-    // Set start and end times (convert to UTC for iCalendar)
-    let start_utc = event.start_time.with_timezone(&chrono::Utc);
-    let end_utc = event.end_time.with_timezone(&chrono::Utc);
-    ical_event.starts(start_utc);
-    ical_event.ends(end_utc);
+    // Set start and end times with timezone awareness
+    // If the timezone is UTC, use the standard format without TZID
+    // Otherwise, include TZID parameter for local times
+    let tz_name = event.timezone.name();
+    
+    if tz_name == "UTC" {
+        // For UTC, use the standard UTC format (with Z suffix)
+        let start_utc = event.start_time.with_timezone(&chrono::Utc);
+        let end_utc = event.end_time.with_timezone(&chrono::Utc);
+        ical_event.starts(start_utc);
+        ical_event.ends(end_utc);
+    } else {
+        // For other timezones, use TZID parameter with local time
+        // Format: DTSTART;TZID=America/New_York:20251027T100000
+        let start_local = event.start_time.format("%Y%m%dT%H%M%S").to_string();
+        let end_local = event.end_time.format("%Y%m%dT%H%M%S").to_string();
+        
+        // Create properties with TZID parameter
+        let mut dtstart = Property::new("DTSTART", &start_local);
+        dtstart.add_parameter("TZID", tz_name);
+        ical_event.append_property(dtstart);
+        
+        let mut dtend = Property::new("DTEND", &end_local);
+        dtend.add_parameter("TZID", tz_name);
+        ical_event.append_property(dtend);
+    }
     
     // Add attendees
     for attendee in &event.attendees {
@@ -151,9 +172,16 @@ fn event_to_ical(event: &Event) -> Result<IEvent> {
         }
     }
     
-    // Add exception dates
+    // Add exception dates with timezone
     for exdate in &event.exdates {
-        ical_event.add_property("EXDATE", &exdate.format("%Y%m%dT%H%M%S").to_string());
+        let exdate_str = exdate.format("%Y%m%dT%H%M%S").to_string();
+        if tz_name == "UTC" {
+            ical_event.add_property("EXDATE", &format!("{}Z", exdate_str));
+        } else {
+            let mut exdate_prop = Property::new("EXDATE", &exdate_str);
+            exdate_prop.add_parameter("TZID", tz_name);
+            ical_event.append_property(exdate_prop);
+        }
     }
     
     Ok(ical_event)
@@ -165,17 +193,9 @@ fn ical_to_event(ical_event: &IEvent) -> Result<Event> {
     let summary = ical_event.get_summary()
         .ok_or_else(|| EventixError::IcsError("Event missing SUMMARY".to_string()))?;
     
-    let start = ical_event.get_start()
-        .ok_or_else(|| EventixError::IcsError("Event missing DTSTART".to_string()))?;
-    
-    let end = ical_event.get_end()
-        .ok_or_else(|| EventixError::IcsError("Event missing DTEND".to_string()))?;
-    
-    // Parse datetime - try to extract timezone
-    let start_str = format!("{:?}", start);
-    let end_str = format!("{:?}", end);
-    let (start_time, _timezone) = parse_ical_datetime(&start_str)?;
-    let end_time = parse_ical_datetime(&end_str)?.0;
+    // Try to extract DTSTART and DTEND properties with timezone info
+    let (start_time, _timezone) = extract_datetime_with_tz(ical_event, "DTSTART")?;
+    let (end_time, _) = extract_datetime_with_tz(ical_event, "DTEND")?;
     
     // Build the event
     let mut builder = Event::builder()
@@ -202,46 +222,82 @@ fn ical_to_event(ical_event: &IEvent) -> Result<Event> {
     builder.build()
 }
 
-/// Parse an iCalendar datetime string
-fn parse_ical_datetime(dt_str: &str) -> Result<(DateTime<Tz>, Tz)> {
-    // Try to parse with timezone information
-    // Format could be: 20251101T100000Z (UTC) or 20251101T100000 with TZID parameter
+/// Extract datetime with timezone from an iCalendar property
+fn extract_datetime_with_tz(ical_event: &IEvent, prop_name: &str) -> Result<(DateTime<Tz>, Tz)> {
+    // Try to find the property directly from the inner properties
+    let props = ical_event.properties();
     
-    // For now, assume UTC if no timezone specified
-    let tz: Tz = "UTC".parse().unwrap();
-    
-    // Parse the datetime string (format: YYYYMMDDTHHMMSS)
-    let dt_str_clean = dt_str.trim_end_matches('Z');
-    
-    if dt_str_clean.len() >= 15 {
-        let year: i32 = dt_str_clean[0..4].parse()
-            .map_err(|_| EventixError::DateTimeParse(format!("Invalid year in: {}", dt_str)))?;
-        let month: u32 = dt_str_clean[4..6].parse()
-            .map_err(|_| EventixError::DateTimeParse(format!("Invalid month in: {}", dt_str)))?;
-        let day: u32 = dt_str_clean[6..8].parse()
-            .map_err(|_| EventixError::DateTimeParse(format!("Invalid day in: {}", dt_str)))?;
-        let hour: u32 = dt_str_clean[9..11].parse()
-            .map_err(|_| EventixError::DateTimeParse(format!("Invalid hour in: {}", dt_str)))?;
-        let minute: u32 = dt_str_clean[11..13].parse()
-            .map_err(|_| EventixError::DateTimeParse(format!("Invalid minute in: {}", dt_str)))?;
-        let second: u32 = dt_str_clean[13..15].parse()
-            .map_err(|_| EventixError::DateTimeParse(format!("Invalid second in: {}", dt_str)))?;
-        
-        let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
-            .and_then(|d| d.and_hms_opt(hour, minute, second))
-            .ok_or_else(|| EventixError::DateTimeParse(format!("Invalid datetime: {}", dt_str)))?;
-        
-        let dt = tz.from_local_datetime(&naive)
-            .earliest()
-            .ok_or_else(|| EventixError::DateTimeParse(format!("Cannot create datetime: {}", dt_str)))?;
-        
-        Ok((dt, tz))
-    } else {
-        Err(EventixError::DateTimeParse(format!("Invalid datetime format: {}", dt_str)))
+    for (key, prop) in props {
+        if key == prop_name {
+            let value = prop.value();
+            
+            // Check if there's a TZID parameter
+            let timezone = if let Some(tzid_param) = prop.params().get("TZID") {
+                // Parse the timezone from TZID parameter (use Debug format)
+                // Debug format is: Parameter { key: "TZID", val: "America/New_York" }
+                let tz_str_raw = format!("{:?}", tzid_param);
+                // Extract the value after 'val: "'
+                let tz_str = if let Some(start_idx) = tz_str_raw.find("val: \"") {
+                    let start = start_idx + 6; // Length of 'val: "'
+                    let remaining = &tz_str_raw[start..];
+                    if let Some(end_idx) = remaining.find('"') {
+                        remaining[..end_idx].to_string()
+                    } else {
+                        return Err(EventixError::InvalidTimezone(format!("Cannot parse TZID parameter: {}", tz_str_raw)));
+                    }
+                } else {
+                    return Err(EventixError::InvalidTimezone(format!("Cannot parse TZID parameter: {}", tz_str_raw)));
+                };
+                crate::timezone::parse_timezone(&tz_str)?
+            } else if value.ends_with('Z') {
+                // UTC timezone
+                crate::timezone::parse_timezone("UTC")?
+            } else {
+                // Default to UTC if no timezone specified
+                crate::timezone::parse_timezone("UTC")?
+            };
+            
+            // Parse the datetime value (format: 20251027T143000 or 20251027T143000Z)
+            let dt_str = value.trim_end_matches('Z');
+            let datetime = parse_ical_datetime_value(dt_str, timezone)?;
+            
+            return Ok((datetime, timezone));
+        }
     }
+    
+    Err(EventixError::IcsError(format!("Property {} not found", prop_name)))
 }
 
-
+/// Parse an iCalendar datetime value string
+fn parse_ical_datetime_value(dt_str: &str, tz: Tz) -> Result<DateTime<Tz>> {
+    // Format: YYYYMMDDTHHMMSS
+    if dt_str.len() < 15 {
+        return Err(EventixError::DateTimeParse(format!("Invalid datetime format: {}", dt_str)));
+    }
+    
+    let year: i32 = dt_str[0..4].parse()
+        .map_err(|_| EventixError::DateTimeParse(format!("Invalid year in: {}", dt_str)))?;
+    let month: u32 = dt_str[4..6].parse()
+        .map_err(|_| EventixError::DateTimeParse(format!("Invalid month in: {}", dt_str)))?;
+    let day: u32 = dt_str[6..8].parse()
+        .map_err(|_| EventixError::DateTimeParse(format!("Invalid day in: {}", dt_str)))?;
+    let hour: u32 = dt_str[9..11].parse()
+        .map_err(|_| EventixError::DateTimeParse(format!("Invalid hour in: {}", dt_str)))?;
+    let minute: u32 = dt_str[11..13].parse()
+        .map_err(|_| EventixError::DateTimeParse(format!("Invalid minute in: {}", dt_str)))?;
+    let second: u32 = dt_str[13..15].parse()
+        .map_err(|_| EventixError::DateTimeParse(format!("Invalid second in: {}", dt_str)))?;
+    
+    let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
+        .and_then(|d| d.and_hms_opt(hour, minute, second))
+        .ok_or_else(|| EventixError::DateTimeParse(format!("Invalid datetime: {}", dt_str)))?;
+    
+    let dt = tz.from_local_datetime(&naive)
+        .earliest()
+        .ok_or_else(|| EventixError::DateTimeParse(format!("Cannot create datetime: {}", dt_str)))?;
+    
+    Ok(dt)
+}
 
 #[cfg(test)]
 mod tests {

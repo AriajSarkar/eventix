@@ -114,9 +114,9 @@ let event = Event::builder()
 ### ICS Import/Export
 
 ```rust
-use Eventix::Calendar;
+use eventix::Calendar;
 
-// Export
+// Export with timezone awareness
 let mut cal = Calendar::new("Work Schedule");
 // ... add events ...
 cal.export_to_ics("schedule.ics")?;
@@ -125,6 +125,36 @@ cal.export_to_ics("schedule.ics")?;
 let imported_cal = Calendar::import_from_ics("schedule.ics")?;
 println!("Imported {} events", imported_cal.event_count());
 ```
+
+**Timezone-Aware ICS Export:**
+
+Events are exported with proper timezone information for compatibility with calendar applications:
+
+```rust
+// Non-UTC timezones include TZID parameter
+let event = Event::builder()
+    .title("Team Meeting")
+    .start("2025-10-27 10:00:00", "America/New_York")
+    .duration_hours(1)
+    .build()?;
+
+// Generates: DTSTART;TZID=America/New_York:20251027T100000
+
+// UTC events use standard Z suffix
+let utc_event = Event::builder()
+    .title("Global Call")
+    .start("2025-10-27 15:00:00", "UTC")
+    .duration_hours(1)
+    .build()?;
+
+// Generates: DTSTART:20251027T150000Z
+```
+
+This ensures events display at the correct local time in:
+- Google Calendar
+- Microsoft Outlook
+- Apple Calendar
+- Any RFC 5545 compliant calendar application
 
 ### Query Events
 
