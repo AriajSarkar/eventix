@@ -58,14 +58,17 @@ fn main() -> anyhow::Result<()> {
         if let Some(desc) = &event.description {
             println!("   Description: {}", desc);
         }
-        println!("   Start: {}", event.start_time.format("%Y-%m-%d %H:%M:%S %Z"));
+        println!(
+            "   Start: {}",
+            event.start_time.format("%Y-%m-%d %H:%M:%S %Z")
+        );
         println!("   End: {}", event.end_time.format("%Y-%m-%d %H:%M:%S %Z"));
         println!("   Duration: {} minutes", event.duration().num_minutes());
-        
+
         if let Some(loc) = &event.location {
             println!("   Location: {}", loc);
         }
-        
+
         if !event.attendees.is_empty() {
             println!("   Attendees: {}", event.attendees.join(", "));
         }

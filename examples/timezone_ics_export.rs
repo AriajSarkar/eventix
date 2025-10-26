@@ -3,8 +3,8 @@
 //! This example shows how events with different timezones are exported
 //! to ICS format with proper TZID parameters for calendar app compatibility.
 
-use eventix::{Calendar, Event, Recurrence};
 use anyhow::Result;
+use eventix::{Calendar, Event, Recurrence};
 
 fn main() -> Result<()> {
     println!("=== Timezone-Aware ICS Export Demo ===\n");
@@ -21,7 +21,7 @@ fn main() -> Result<()> {
         .duration_hours(1)
         .location("Conference Room A")
         .build()?;
-    
+
     cal.add_event(ny_event);
 
     // Event 2: Asia/Kolkata timezone
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
         .duration_minutes(30)
         .location("Virtual - Zoom")
         .build()?;
-    
+
     cal.add_event(kolkata_event);
 
     // Event 3: Europe/London timezone
@@ -45,7 +45,7 @@ fn main() -> Result<()> {
         .duration_hours(2)
         .location("London Office")
         .build()?;
-    
+
     cal.add_event(london_event);
 
     // Event 4: UTC timezone (for comparison)
@@ -57,7 +57,7 @@ fn main() -> Result<()> {
         .duration_hours(1)
         .location("Virtual - Teams")
         .build()?;
-    
+
     cal.add_event(utc_event);
 
     // Event 5: Recurring event with timezone
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
         .skip_weekends(true)
         .location("San Francisco Office")
         .build()?;
-    
+
     cal.add_event(recurring_event);
 
     // Event 6: Event with exception dates in Asia/Tokyo
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
     use eventix::timezone;
     let tokyo_tz = timezone::parse_timezone("Asia/Tokyo")?;
     let exception_date = timezone::parse_datetime_with_tz("2025-11-05 10:00:00", tokyo_tz)?;
-    
+
     let tokyo_event = Event::builder()
         .title("Tokyo Morning Briefing")
         .description("Daily briefing (skipping Nov 5)")
@@ -89,7 +89,7 @@ fn main() -> Result<()> {
         .exception_date(exception_date)
         .location("Tokyo HQ")
         .build()?;
-    
+
     cal.add_event(tokyo_event);
 
     // Export to ICS
@@ -101,7 +101,7 @@ fn main() -> Result<()> {
     // Display the ICS content for inspection
     println!("\n=== ICS Content Preview ===");
     let ics_content = cal.to_ics_string()?;
-    
+
     // Show timezone-specific DTSTART/DTEND entries
     println!("\nTimezone-aware date/time entries:");
     for line in ics_content.lines() {

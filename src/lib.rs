@@ -118,17 +118,17 @@
 
 pub mod calendar;
 pub mod event;
-pub mod recurrence;
-pub mod ics;
-pub mod timezone;
 pub mod gap_validation;
+pub mod ics;
+pub mod recurrence;
+pub mod timezone;
 
 mod error;
 
 pub use calendar::Calendar;
+pub use error::{EventixError, Result};
 pub use event::{Event, EventBuilder};
 pub use recurrence::Recurrence;
-pub use error::{EventixError, Result};
 
 // Re-export commonly used types
 pub use chrono::{DateTime, Duration, NaiveDateTime};

@@ -7,8 +7,7 @@ fn main() -> anyhow::Result<()> {
     println!("=== eventix ICS Import/Export Example ===\n");
 
     // Create a calendar with various events
-    let mut cal = Calendar::new("Work Calendar")
-        .description("My work schedule and meetings");
+    let mut cal = Calendar::new("Work Calendar").description("My work schedule and meetings");
 
     // Add a one-time event
     let presentation = Event::builder()
@@ -62,7 +61,11 @@ fn main() -> anyhow::Result<()> {
 
     cal.add_event(review);
 
-    println!("Created calendar '{}' with {} events\n", cal.name, cal.event_count());
+    println!(
+        "Created calendar '{}' with {} events\n",
+        cal.name,
+        cal.event_count()
+    );
 
     // Export to ICS file
     let ics_path = "work_calendar.ics";
@@ -80,12 +83,15 @@ fn main() -> anyhow::Result<()> {
     // Import the calendar back
     println!("=== Importing from ICS ===");
     let imported_cal = Calendar::import_from_ics(ics_path)?;
-    
+
     println!("Imported calendar: {}", imported_cal.name);
     if let Some(desc) = &imported_cal.description {
         println!("Description: {}", desc);
     }
-    println!("Number of events imported: {}\n", imported_cal.event_count());
+    println!(
+        "Number of events imported: {}\n",
+        imported_cal.event_count()
+    );
 
     // Display imported events
     println!("=== Imported Events ===");
@@ -96,15 +102,15 @@ fn main() -> anyhow::Result<()> {
         }
         println!("   Start: {}", event.start_time.format("%Y-%m-%d %H:%M %Z"));
         println!("   End: {}", event.end_time.format("%Y-%m-%d %H:%M %Z"));
-        
+
         if let Some(loc) = &event.location {
             println!("   Location: {}", loc);
         }
-        
+
         if !event.attendees.is_empty() {
             println!("   Attendees: {}", event.attendees.join(", "));
         }
-        
+
         if let Some(uid) = &event.uid {
             println!("   UID: {}", uid);
         }
@@ -114,7 +120,7 @@ fn main() -> anyhow::Result<()> {
     println!("\n=== Working with Imported Calendar ===");
     let found = imported_cal.find_events_by_title("standup");
     println!("Found {} event(s) matching 'standup'", found.len());
-    
+
     // Clean up
     println!("\n=== Cleanup ===");
     if Path::new(ics_path).exists() {
@@ -123,11 +129,11 @@ fn main() -> anyhow::Result<()> {
     }
 
     println!("\n=== Alternative: Working with ICS Strings ===");
-    
+
     // You can also work with ICS strings directly without files
     let ics_string = imported_cal.to_ics_string()?;
     println!("ICS string length: {} bytes", ics_string.len());
-    
+
     // Parse from string
     let cal_from_string = Calendar::from_ics_string(&ics_string)?;
     println!("Successfully parsed calendar from string");

@@ -1,22 +1,22 @@
 //! Calendar type for managing collections of events
 
+use crate::error::Result;
+use crate::event::Event;
 use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
-use crate::event::Event;
-use crate::error::Result;
 
 /// A calendar containing multiple events
 #[derive(Debug, Clone)]
 pub struct Calendar {
     /// Calendar name
     pub name: String,
-    
+
     /// Optional description
     pub description: Option<String>,
-    
+
     /// List of events in this calendar
     pub events: Vec<Event>,
-    
+
     /// Calendar timezone (default for new events)
     pub timezone: Option<Tz>,
 }
@@ -132,7 +132,7 @@ impl Calendar {
 
         for (index, event) in self.events.iter().enumerate() {
             let event_occurrences = event.occurrences_between(start, end, 1000)?;
-            
+
             for occurrence_time in event_occurrences {
                 occurrences.push(EventOccurrence {
                     event_index: index,
@@ -152,11 +152,11 @@ impl Calendar {
     pub fn events_on_date(&self, date: DateTime<Tz>) -> Result<Vec<EventOccurrence<'_>>> {
         let start = date.date_naive().and_hms_opt(0, 0, 0).unwrap();
         let end = date.date_naive().and_hms_opt(23, 59, 59).unwrap();
-        
+
         let tz = date.timezone();
         let start_dt = tz.from_local_datetime(&start).earliest().unwrap();
         let end_dt = tz.from_local_datetime(&end).latest().unwrap();
-        
+
         self.events_between(start_dt, end_dt)
     }
 
@@ -188,69 +188,80 @@ impl Calendar {
             })).collect::<Vec<_>>(),
             "timezone": self.timezone.map(|tz| tz.name()),
         });
-        
-        serde_json::to_string_pretty(&json_val)
-            .map_err(|e| crate::error::EventixError::Other(format!("JSON serialization error: {}", e)))
+
+        serde_json::to_string_pretty(&json_val).map_err(|e| {
+            crate::error::EventixError::Other(format!("JSON serialization error: {}", e))
+        })
     }
 
     /// Import calendar from JSON
     pub fn from_json(json: &str) -> Result<Self> {
         use crate::timezone::parse_timezone;
-        
+
         let value: serde_json::Value = serde_json::from_str(json)
             .map_err(|e| crate::error::EventixError::Other(format!("JSON parse error: {}", e)))?;
-        
-        let name = value["name"].as_str()
+
+        let name = value["name"]
+            .as_str()
             .ok_or_else(|| crate::error::EventixError::Other("Missing 'name' field".to_string()))?
             .to_string();
-        
+
         let description = value["description"].as_str().map(|s| s.to_string());
-        
-        let timezone = value["timezone"].as_str()
+
+        let timezone = value["timezone"]
+            .as_str()
             .and_then(|tz_str| parse_timezone(tz_str).ok());
-        
+
         let mut calendar = Calendar {
             name,
             description,
             events: Vec::new(),
             timezone,
         };
-        
+
         if let Some(events_array) = value["events"].as_array() {
             for event_val in events_array {
-                let title = event_val["title"].as_str()
-                    .ok_or_else(|| crate::error::EventixError::Other("Event missing 'title'".to_string()))?;
-                
-                let start_str = event_val["start_time"].as_str()
-                    .ok_or_else(|| crate::error::EventixError::Other("Event missing 'start_time'".to_string()))?;
-                
-                let end_str = event_val["end_time"].as_str()
-                    .ok_or_else(|| crate::error::EventixError::Other("Event missing 'end_time'".to_string()))?;
-                
-                let tz_str = event_val["timezone"].as_str()
-                    .ok_or_else(|| crate::error::EventixError::Other("Event missing 'timezone'".to_string()))?;
-                
+                let title = event_val["title"].as_str().ok_or_else(|| {
+                    crate::error::EventixError::Other("Event missing 'title'".to_string())
+                })?;
+
+                let start_str = event_val["start_time"].as_str().ok_or_else(|| {
+                    crate::error::EventixError::Other("Event missing 'start_time'".to_string())
+                })?;
+
+                let end_str = event_val["end_time"].as_str().ok_or_else(|| {
+                    crate::error::EventixError::Other("Event missing 'end_time'".to_string())
+                })?;
+
+                let tz_str = event_val["timezone"].as_str().ok_or_else(|| {
+                    crate::error::EventixError::Other("Event missing 'timezone'".to_string())
+                })?;
+
                 let tz = parse_timezone(tz_str)?;
-                let start_time: DateTime<chrono::Utc> = chrono::DateTime::parse_from_rfc3339(start_str)
-                    .map_err(|e| crate::error::EventixError::DateTimeParse(e.to_string()))?
-                    .with_timezone(&chrono::Utc);
+                let start_time: DateTime<chrono::Utc> =
+                    chrono::DateTime::parse_from_rfc3339(start_str)
+                        .map_err(|e| crate::error::EventixError::DateTimeParse(e.to_string()))?
+                        .with_timezone(&chrono::Utc);
                 let end_time: DateTime<chrono::Utc> = chrono::DateTime::parse_from_rfc3339(end_str)
                     .map_err(|e| crate::error::EventixError::DateTimeParse(e.to_string()))?
                     .with_timezone(&chrono::Utc);
-                
+
                 let start_time_tz = start_time.with_timezone(&tz);
                 let end_time_tz = end_time.with_timezone(&tz);
-                
+
                 let event = Event {
                     title: title.to_string(),
                     description: event_val["description"].as_str().map(|s| s.to_string()),
                     start_time: start_time_tz,
                     end_time: end_time_tz,
                     timezone: tz,
-                    attendees: event_val["attendees"].as_array()
-                        .map(|arr| arr.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect())
+                    attendees: event_val["attendees"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
                         .unwrap_or_default(),
                     recurrence: None,
                     recurrence_filter: None,
@@ -258,11 +269,11 @@ impl Calendar {
                     location: event_val["location"].as_str().map(|s| s.to_string()),
                     uid: event_val["uid"].as_str().map(|s| s.to_string()),
                 };
-                
+
                 calendar.add_event(event);
             }
         }
-        
+
         Ok(calendar)
     }
 }
@@ -272,10 +283,10 @@ impl Calendar {
 pub struct EventOccurrence<'a> {
     /// Index of the event in the calendar
     pub event_index: usize,
-    
+
     /// Reference to the event
     pub event: &'a Event,
-    
+
     /// When this occurrence happens
     pub occurrence_time: DateTime<Tz>,
 }
@@ -305,9 +316,8 @@ mod tests {
 
     #[test]
     fn test_calendar_creation() {
-        let cal = Calendar::new("Test Calendar")
-            .description("A test calendar");
-        
+        let cal = Calendar::new("Test Calendar").description("A test calendar");
+
         assert_eq!(cal.name, "Test Calendar");
         assert_eq!(cal.description, Some("A test calendar".to_string()));
         assert_eq!(cal.event_count(), 0);
@@ -316,14 +326,14 @@ mod tests {
     #[test]
     fn test_add_events() {
         let mut cal = Calendar::new("My Calendar");
-        
+
         let event = Event::builder()
             .title("Event 1")
             .start("2025-11-01 10:00:00", "UTC")
             .duration_hours(1)
             .build()
             .unwrap();
-        
+
         cal.add_event(event);
         assert_eq!(cal.event_count(), 1);
     }
@@ -331,24 +341,24 @@ mod tests {
     #[test]
     fn test_find_events() {
         let mut cal = Calendar::new("My Calendar");
-        
+
         let event1 = Event::builder()
             .title("Team Meeting")
             .start("2025-11-01 10:00:00", "UTC")
             .duration_hours(1)
             .build()
             .unwrap();
-        
+
         let event2 = Event::builder()
             .title("Code Review")
             .start("2025-11-02 14:00:00", "UTC")
             .duration_hours(1)
             .build()
             .unwrap();
-        
+
         cal.add_event(event1);
         cal.add_event(event2);
-        
+
         let found = cal.find_events_by_title("meeting");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].title, "Team Meeting");
@@ -363,12 +373,12 @@ mod tests {
             .duration_hours(1)
             .build()
             .unwrap();
-        
+
         cal.add_event(event);
-        
+
         let json = cal.to_json().unwrap();
         let restored = Calendar::from_json(&json).unwrap();
-        
+
         assert_eq!(restored.name, "Test");
         assert_eq!(restored.event_count(), 1);
     }

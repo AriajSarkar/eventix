@@ -1,9 +1,9 @@
 //! Recurrence rules and patterns for repeating events
 
+use crate::error::Result;
 use chrono::{DateTime, Datelike, TimeZone};
 use chrono_tz::Tz;
 use rrule::Frequency;
-use crate::error::Result;
 
 /// Recurrence pattern for events
 #[derive(Debug, Clone)]
@@ -165,44 +165,54 @@ impl Recurrence {
     /// Build an RRule string for this recurrence
     pub fn to_rrule_string(&self, dtstart: DateTime<Tz>) -> Result<String> {
         let mut rrule_str = format!("FREQ={:?}", self.frequency).to_uppercase();
-        
+
         if self.interval > 1 {
             rrule_str.push_str(&format!(";INTERVAL={}", self.interval));
         }
-        
+
         if let Some(count) = self.count {
             rrule_str.push_str(&format!(";COUNT={}", count));
         }
-        
+
         if let Some(until) = self.until {
             let until_str = until.format("%Y%m%dT%H%M%SZ").to_string();
             rrule_str.push_str(&format!(";UNTIL={}", until_str));
         }
-        
+
         if let Some(ref weekdays) = self.by_weekday {
-            let days: Vec<String> = weekdays.iter()
+            let days: Vec<String> = weekdays
+                .iter()
                 .map(|wd| format!("{:?}", wd).to_uppercase())
                 .collect();
             rrule_str.push_str(&format!(";BYDAY={}", days.join(",")));
         }
-        
-        Ok(format!("DTSTART:{}\nRRULE:{}", 
+
+        Ok(format!(
+            "DTSTART:{}\nRRULE:{}",
             dtstart.format("%Y%m%dT%H%M%S"),
-            rrule_str))
+            rrule_str
+        ))
     }
 
     /// Generate occurrences for this recurrence pattern
     ///
     /// Returns a vector of `DateTime<Tz>` representing each occurrence
-    pub fn generate_occurrences(&self, start: DateTime<Tz>, max_occurrences: usize) -> Result<Vec<DateTime<Tz>>> {
+    pub fn generate_occurrences(
+        &self,
+        start: DateTime<Tz>,
+        max_occurrences: usize,
+    ) -> Result<Vec<DateTime<Tz>>> {
         // Simplified recurrence generation without using rrule library for now
         // This is a basic implementation that handles common cases
-        
+
         let mut occurrences = Vec::new();
         let mut current = start;
-        
-        let count_limit = self.count.unwrap_or(max_occurrences as u32).min(max_occurrences as u32);
-        
+
+        let count_limit = self
+            .count
+            .unwrap_or(max_occurrences as u32)
+            .min(max_occurrences as u32);
+
         for _ in 0..count_limit {
             // Check until date if specified
             if let Some(until) = self.until {
@@ -210,9 +220,9 @@ impl Recurrence {
                     break;
                 }
             }
-            
+
             occurrences.push(current);
-            
+
             // Calculate next occurrence based on frequency
             current = match self.frequency {
                 Frequency::Daily => current + chrono::Duration::days(self.interval as i64),
@@ -222,20 +232,26 @@ impl Recurrence {
                     let months_to_add = self.interval as i32;
                     let mut new_month = current.month() as i32 + months_to_add;
                     let mut new_year = current.year();
-                    
+
                     while new_month > 12 {
                         new_month -= 12;
                         new_year += 1;
                     }
-                    
-                    let new_date = current.date_naive()
-                        .with_year(new_year).and_then(|d| d.with_month(new_month as u32));
-                    
+
+                    let new_date = current
+                        .date_naive()
+                        .with_year(new_year)
+                        .and_then(|d| d.with_month(new_month as u32));
+
                     match new_date {
                         Some(date) => {
                             let time = current.time();
                             let naive = chrono::NaiveDateTime::new(date, time);
-                            current.timezone().from_local_datetime(&naive).earliest().unwrap_or(current)
+                            current
+                                .timezone()
+                                .from_local_datetime(&naive)
+                                .earliest()
+                                .unwrap_or(current)
                         }
                         None => break,
                     }
@@ -243,12 +259,16 @@ impl Recurrence {
                 Frequency::Yearly => {
                     let new_year = current.year() + self.interval as i32;
                     let new_date = current.date_naive().with_year(new_year);
-                    
+
                     match new_date {
                         Some(date) => {
                             let time = current.time();
                             let naive = chrono::NaiveDateTime::new(date, time);
-                            current.timezone().from_local_datetime(&naive).earliest().unwrap_or(current)
+                            current
+                                .timezone()
+                                .from_local_datetime(&naive)
+                                .earliest()
+                                .unwrap_or(current)
                         }
                         None => break,
                     }
@@ -256,7 +276,7 @@ impl Recurrence {
                 _ => break, // Unsupported frequency
             };
         }
-        
+
         Ok(occurrences)
     }
 }
@@ -300,14 +320,15 @@ impl RecurrenceFilter {
         }
 
         // Check if it's in the skip list
-        self.skip_dates.iter().any(|skip_date| {
-            skip_date.date_naive() == date.date_naive()
-        })
+        self.skip_dates
+            .iter()
+            .any(|skip_date| skip_date.date_naive() == date.date_naive())
     }
 
     /// Filter a list of occurrences
     pub fn filter_occurrences(&self, occurrences: Vec<DateTime<Tz>>) -> Vec<DateTime<Tz>> {
-        occurrences.into_iter()
+        occurrences
+            .into_iter()
             .filter(|dt| !self.should_skip(dt))
             .collect()
     }
@@ -342,11 +363,11 @@ mod tests {
     #[test]
     fn test_recurrence_filter_weekends() {
         let filter = RecurrenceFilter::new().skip_weekends(true);
-        
+
         let tz = parse_timezone("UTC").unwrap();
         let saturday = crate::timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap(); // Saturday
         let monday = crate::timezone::parse_datetime_with_tz("2025-11-03 10:00:00", tz).unwrap(); // Monday
-        
+
         assert!(filter.should_skip(&saturday));
         assert!(!filter.should_skip(&monday));
     }
