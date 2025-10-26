@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-10-26
+
+### Improved
+- **Enhanced documentation** in main `lib.rs`:
+  - Added timezone-aware ICS export example
+  - Added schedule analysis example showcasing gap validation features
+  - Added module overview with descriptions
+  - Added references to example files
+  - Improved feature highlights to emphasize unique gap validation capabilities
+- All 25 doc tests passing (2 new examples)
+
 ## [0.1.1] - 2025-10-26
 
 ### Added
