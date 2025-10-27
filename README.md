@@ -7,6 +7,7 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 [![CI](https://github.com/AriajSarkar/eventix/workflows/Rust%20CI/badge.svg)](https://github.com/AriajSarkar/eventix/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
+
 ## Features
 
 - 🌍 **Timezone-aware events** - Full support for timezones and DST handling using `chrono-tz`
