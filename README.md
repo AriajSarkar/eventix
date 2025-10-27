@@ -3,7 +3,7 @@
 A high-level calendar and recurrence library for Rust with timezone-aware scheduling, exceptions, and ICS import/export.
 
 [![Crates.io](https://img.shields.io/crates/v/Eventix.svg)](https://crates.io/crates/Eventix)
-[![Documentation](https://docs.rs/Eventix/badge.svg)](https://docs.rs/Eventix)
+[![Documentation](https://docs.rs/Eventix/badge.svg)](https://docs.rs/eventix)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
 ## Features
