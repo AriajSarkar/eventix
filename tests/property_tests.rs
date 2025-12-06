@@ -9,7 +9,7 @@ proptest! {
     fn test_recurrence_daily_count_invariant(
         count in 1u32..100,
         start_year in 2020i32..2030,
-        start_month in 1u32..12,
+        start_month in 1u32..=12,
         start_day in 1u32..28, // Safe day range
         hour in 0u32..23,
         minute in 0u32..59
