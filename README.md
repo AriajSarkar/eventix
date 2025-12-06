@@ -13,6 +13,7 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 - 🌍 **Timezone-aware events** - Full support for timezones and DST handling using `chrono-tz`
 - 🔄 **Recurrence patterns** - Daily, weekly, monthly, and yearly recurrence with advanced rules
 - 🚫 **Exception handling** - Skip specific dates, weekends, or custom holiday lists
+- 🚦 **Booking workflow** - Manage event status (`Confirmed`, `Tentative`, `Cancelled`) with smart gap validation
 - 📅 **ICS support** - Import and export events using the iCalendar (`.ics`) format
 - 🛠️ **Builder API** - Ergonomic, fluent interface for creating events and calendars
 - 🔍 **Gap validation** - Find gaps between events, detect conflicts, analyze schedule density
@@ -111,6 +112,25 @@ let event = Event::builder()
     .duration_hours(2)
     .recurrence(Recurrence::monthly().count(12))
     .build()?;
+```
+
+### Booking Workflow
+
+```rust
+use eventix::{Event, EventStatus};
+
+let mut event = Event::builder()
+    .title("Tentative Meeting")
+    .start("2025-11-01 10:00:00", "UTC")
+    .duration_hours(1)
+    .status(EventStatus::Tentative)
+    .build()?;
+
+// Later, confirm the booking
+event.confirm();
+
+// Or cancel it (automatically ignored by gap validation)
+event.cancel();
 ```
 
 ### ICS Import/Export

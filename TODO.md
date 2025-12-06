@@ -5,7 +5,7 @@ This document outlines the strategic technical direction for the `eventix` crate
 ## 1. Core Platform Logic (Booking Lifecycle)
 *Objective: Transition from a pure calendar parser to a stateful booking engine.*
 
-- [ ] **Booking State Machine** `(Priority: High)`
+- [x] **Booking State Machine** `(Priority: High)`
     - **RFC**: Introduce `EventStatus` enum (`Confirmed`, `Tentative`, `Cancelled`, `Blocked`).
     - **Implementation**: strict state transitions (`confirm()`, `cancel()`, `reschedule()`) to ensure data integrity.
     - **Impact**: Enables `gap_validation` to automatically ignore cancelled events, significantly reducing implementation complexity for consumers.
