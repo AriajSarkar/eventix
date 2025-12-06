@@ -102,10 +102,10 @@
 //!
 //! - [`calendar`] - Calendar container for managing collections of events
 //! - [`event`] - Event types and builder API
+//! - [`gap_validation`] - Schedule analysis, gap detection, and conflict resolution (unique feature)
+//! - [`ics`] - ICS (iCalendar) import/export with TZID support
 //! - [`recurrence`] - Recurrence patterns (daily, weekly, monthly, yearly)
 //! - [`timezone`] - Timezone utilities with DST awareness
-//! - [`ics`] - ICS (iCalendar) import/export with TZID support
-//! - [`gap_validation`] - Schedule analysis, gap detection, and conflict resolution (unique feature)
 //!
 //! ## Examples
 //!
