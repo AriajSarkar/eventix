@@ -15,6 +15,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -50,3 +52,42 @@ jobs:
             README.md
             LICENSE-MIT
             LICENSE-APACHE
+
+      - name: Update README version
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          # Checkout main branch for updates (release triggered on tag)
+          git checkout main
+          git pull origin main --rebase
+          
+          # Configure Git
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # Extract version from tag (e.g., v0.3.0 -> 0.3.0)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Updating README to version $VERSION"
+          
+          # Replace 'eventix = "..."' with 'eventix = "$VERSION"', preserving indentation
+          sed -i "s/^\([[:space:]]*\)eventix = \".*\"/\1eventix = \"$VERSION\"/" README.md
+          
+          # Check for changes
+          if git diff --quiet README.md; then
+            echo "No changes to README.md"
+          else
+            git commit -am "docs: update readme version to $VERSION [skip ci]"
+            git push origin main
+            echo "Pushed README update to main"
+          fi
+
+      - name: Merge main into dev
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Merging main into dev..."
+          
+          git checkout dev
+          git pull origin dev --rebase
+          git merge origin/main -m "merge: sync main to dev after release $VERSION"
+          git push origin dev
+          echo "Merged main into dev"
