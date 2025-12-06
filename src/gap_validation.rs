@@ -398,6 +398,39 @@ pub fn is_slot_available(
 /// Suggest alternative times for a conflicting event
 ///
 /// Finds available slots near the requested time.
+///
+/// # Examples
+///
+/// ```
+/// use eventix::{Calendar, Event, gap_validation};
+/// use eventix::timezone::parse_datetime_with_tz;
+/// use chrono::Duration;
+///
+/// let mut cal = Calendar::new("Test");
+/// let tz = eventix::timezone::parse_timezone("UTC").unwrap();
+///
+/// // Existing event 9-10
+/// let event = Event::builder()
+///     .title("Meeting")
+///     .start("2025-11-01 09:00:00", "UTC")
+///     .duration_hours(1)
+///     .build()
+///     .unwrap();
+/// cal.add_event(event);
+///
+/// // Attempt to schedule 9:30-10:30 (conflict)
+/// let requested = parse_datetime_with_tz("2025-11-01 09:30:00", tz).unwrap();
+///
+/// // Find alternatives within +/- 4 hours
+/// let alternatives = gap_validation::suggest_alternatives(
+///     &cal,
+///     requested,
+///     Duration::hours(1), // 1 hour duration
+///     Duration::hours(4)  // Search window
+/// ).unwrap();
+///
+/// assert!(alternatives.len() > 0);
+/// ```
 pub fn suggest_alternatives(
     calendar: &Calendar,
     requested_start: DateTime<Tz>,
