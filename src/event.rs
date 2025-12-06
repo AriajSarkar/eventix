@@ -170,6 +170,11 @@ impl Event {
         self.status = EventStatus::Tentative;
     }
 
+    /// Block the event (similar to Confirmed, but explicit)
+    pub fn block(&mut self) {
+        self.status = EventStatus::Blocked;
+    }
+
     /// Reschedule the event to a new time
     ///
     /// This updates the start and end times. If the event was Cancelled,

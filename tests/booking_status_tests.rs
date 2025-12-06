@@ -31,7 +31,7 @@ fn test_event_status_lifecycle() {
     assert!(event.is_active());
 
     // Blocked
-    event.status = EventStatus::Blocked;
+    event.block();
     assert_eq!(event.status, EventStatus::Blocked);
     assert!(event.is_active());
 }
