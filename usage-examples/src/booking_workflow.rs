@@ -35,14 +35,9 @@ pub fn run() -> eventix::Result<()> {
 
     // 4. Verify Gap Validation
     println!("\n4. Verifying availability...");
-    let start = eventix::timezone::parse_datetime_with_tz(
-        "2025-11-10 09:00:00",
-        eventix::timezone::parse_timezone("UTC")?,
-    )?;
-    let end = eventix::timezone::parse_datetime_with_tz(
-        "2025-11-10 12:00:00",
-        eventix::timezone::parse_timezone("UTC")?,
-    )?;
+    let tz = eventix::timezone::parse_timezone("UTC")?;
+    let start = eventix::timezone::parse_datetime_with_tz("2025-11-10 09:00:00", tz)?;
+    let end = eventix::timezone::parse_datetime_with_tz("2025-11-10 12:00:00", tz)?;
 
     let density = eventix::gap_validation::calculate_density(&cal, start, end)?;
 

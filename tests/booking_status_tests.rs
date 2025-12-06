@@ -129,3 +129,22 @@ fn test_gap_validation_ignores_cancelled_events() {
 
     assert!(cancelled_slot_gap.is_some(), "Should find a gap where the cancelled event is");
 }
+
+#[test]
+fn test_event_status_serialization() {
+    let mut cal = Calendar::new("Test Calendar");
+    let event = Event::builder()
+        .title("Cancelled Event")
+        .start("2025-11-01 10:00:00", "UTC")
+        .duration_hours(1)
+        .status(EventStatus::Cancelled)
+        .build()
+        .unwrap();
+
+    cal.add_event(event);
+
+    let json = cal.to_json().unwrap();
+    let restored = Calendar::from_json(&json).unwrap();
+
+    assert_eq!(restored.get_events()[0].status, EventStatus::Cancelled);
+}

@@ -6,8 +6,10 @@ use crate::timezone::{parse_datetime_with_tz, parse_timezone};
 use chrono::{DateTime, Duration, TimeZone};
 use chrono_tz::Tz;
 
+use serde::{Deserialize, Serialize};
+
 /// Status of an event in the booking lifecycle
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum EventStatus {
     /// The event is confirmed and occupies time (default)
     #[default]

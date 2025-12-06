@@ -218,6 +218,7 @@ impl Calendar {
                 "attendees": e.attendees,
                 "location": e.location,
                 "uid": e.uid,
+                "status": e.status,
             })).collect::<Vec<_>>(),
             "timezone": self.timezone.map(|tz| tz.name()),
         });
@@ -297,7 +298,10 @@ impl Calendar {
                     exdates: Vec::new(),
                     location: event_val["location"].as_str().map(|s| s.to_string()),
                     uid: event_val["uid"].as_str().map(|s| s.to_string()),
-                    status: crate::event::EventStatus::default(), // Default to Confirmed if missing
+                    status: event_val
+                        .get("status")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok())
+                        .unwrap_or_default(),
                 };
 
                 calendar.add_event(event);
