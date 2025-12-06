@@ -93,7 +93,7 @@ fn main() -> Result<()> {
     cal.add_event(tokyo_event);
 
     // Export to ICS
-    // Export to ICS
+    println!("\n=== Exporting to ICS ===");
     println!("\n=== Exporting to ICS ===");
 
     let output_dir = std::path::Path::new("examples_output");
