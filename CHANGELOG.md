@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Rustfmt**: Added `rustfmt.toml` to enforce consistent code style.
 
 ### Changed
-- **Refactoring**: Significant systematic CI run refactor (`7a4c17e`).
+- **Refactoring**: Significant systematic CI improvements and codebase refactoring.
 - **Features**: Consolidated calendar and event management features including timezone handling, recurrence, ICS, and gap validation.
 - **Documentation**: Updated `README.md` and refined examples for better clarity.
 
@@ -71,5 +71,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.2.0]: https://github.com/AriajSarkar/eventix/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/AriajSarkar/eventix/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/AriajSarkar/eventix/compare/v0.1.0...v0.1.1
-
 [0.1.0]: https://github.com/AriajSarkar/eventix/releases/tag/v0.1.0
