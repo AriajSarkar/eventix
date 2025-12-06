@@ -29,6 +29,11 @@ fn test_event_status_lifecycle() {
     event.tentative();
     assert_eq!(event.status, EventStatus::Tentative);
     assert!(event.is_active());
+
+    // Blocked
+    event.status = EventStatus::Blocked;
+    assert_eq!(event.status, EventStatus::Blocked);
+    assert!(event.is_active());
 }
 
 #[test]
@@ -122,10 +127,12 @@ fn test_gap_validation_ignores_cancelled_events() {
     // 10:00 - 11:00 (1h) - This exists ONLY because the event is cancelled
     // 12:00 - 13:00 (1h)
 
-    let cancelled_slot_gap = gaps.iter().find(|gap| {
-        gap.start.format("%H:%M:%S").to_string() == "10:00:00"
-            && gap.end.format("%H:%M:%S").to_string() == "11:00:00"
-    });
+    let cancelled_slot_start = timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+    let cancelled_slot_end = timezone::parse_datetime_with_tz("2025-11-01 11:00:00", tz).unwrap();
+
+    let cancelled_slot_gap = gaps
+        .iter()
+        .find(|gap| gap.start == cancelled_slot_start && gap.end == cancelled_slot_end);
 
     assert!(cancelled_slot_gap.is_some(), "Should find a gap where the cancelled event is");
 }

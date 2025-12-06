@@ -149,7 +149,10 @@ impl Event {
     /// Returns true for Confirmed, Tentative, and Blocked.
     /// Returns false for Cancelled.
     pub fn is_active(&self) -> bool {
-        self.status != EventStatus::Cancelled
+        matches!(
+            self.status,
+            EventStatus::Confirmed | EventStatus::Tentative | EventStatus::Blocked
+        )
     }
 
     /// Confirm the event
@@ -171,6 +174,8 @@ impl Event {
     ///
     /// This updates the start and end times. If the event was Cancelled,
     /// it automatically resets the status to Confirmed.
+    ///
+    /// This also updates the event's timezone to match the new start time.
     pub fn reschedule(&mut self, new_start: DateTime<Tz>, new_end: DateTime<Tz>) -> Result<()> {
         if new_end <= new_start {
             return Err(EventixError::ValidationError(
@@ -179,6 +184,7 @@ impl Event {
         }
         self.start_time = new_start;
         self.end_time = new_end;
+        self.timezone = new_start.timezone();
 
         // If rescheduling a cancelled event, assume it's valid again
         if self.status == EventStatus::Cancelled {

@@ -298,10 +298,15 @@ impl Calendar {
                     exdates: Vec::new(),
                     location: event_val["location"].as_str().map(|s| s.to_string()),
                     uid: event_val["uid"].as_str().map(|s| s.to_string()),
-                    status: event_val
-                        .get("status")
-                        .and_then(|v| serde_json::from_value(v.clone()).ok())
-                        .unwrap_or_default(),
+                    status: match event_val.get("status") {
+                        None => crate::event::EventStatus::default(),
+                        Some(v) => serde_json::from_value(v.clone()).map_err(|e| {
+                            crate::error::EventixError::Other(format!(
+                                "Invalid event status '{}': {}",
+                                v, e
+                            ))
+                        })?,
+                    },
                 };
 
                 calendar.add_event(event);
@@ -370,6 +375,30 @@ mod tests {
 
         cal.add_event(event);
         assert_eq!(cal.event_count(), 1);
+    }
+
+    #[test]
+    fn test_update_event() {
+        let mut cal = Calendar::new("My Calendar");
+        let event = Event::builder()
+            .title("Event 1")
+            .start("2025-11-01 10:00:00", "UTC")
+            .duration_hours(1)
+            .build()
+            .unwrap();
+        cal.add_event(event);
+
+        // Update successful
+        let updated = cal.update_event(0, |e| {
+            e.confirm(); // Was already confirmed, but testing the closure execution
+            e.title = "Updated Title".to_string();
+        });
+        assert!(updated.is_some());
+        assert_eq!(cal.events[0].title, "Updated Title");
+
+        // Update invalid index
+        let result = cal.update_event(99, |_| {});
+        assert!(result.is_none());
     }
 
     #[test]
