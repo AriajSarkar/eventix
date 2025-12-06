@@ -31,7 +31,7 @@ eventix = "0.2"
 ### Basic Usage
 
 ```rust
-use Eventix::{Calendar, Event, Recurrence};
+use eventix::{Calendar, Event, Recurrence};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a calendar
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Daily Recurrence with Exceptions
 
 ```rust
-use Eventix::{Event, Recurrence, timezone};
+use eventix::{Event, Recurrence, timezone};
 
 let tz = timezone::parse_timezone("America/New_York")?;
 let holiday = timezone::parse_datetime_with_tz("2025-11-27 09:00:00", tz)?;
@@ -90,7 +90,7 @@ let event = Event::builder()
 ### Weekly Recurrence
 
 ```rust
-use Eventix::{Event, Recurrence};
+use eventix::{Event, Recurrence};
 
 let event = Event::builder()
     .title("Weekly Team Meeting")
@@ -103,7 +103,7 @@ let event = Event::builder()
 ### Monthly Recurrence
 
 ```rust
-use Eventix::{Event, Recurrence};
+use eventix::{Event, Recurrence};
 
 let event = Event::builder()
     .title("Monthly All-Hands")
@@ -161,7 +161,7 @@ This ensures events display at the correct local time in:
 ### Query Events
 
 ```rust
-use Eventix::{Calendar, timezone};
+use eventix::{Calendar, timezone};
 
 let cal = Calendar::new("My Calendar");
 // ... add events ...
@@ -186,7 +186,7 @@ let events = cal.events_on_date(date)?;
 **Unique to Eventix** - Features not found in other calendar crates:
 
 ```rust
-use Eventix::{Calendar, Event, gap_validation, timezone};
+use eventix::{Calendar, Event, gap_validation, timezone};
 use chrono::Duration;
 
 let mut cal = Calendar::new("Work Schedule");
@@ -286,7 +286,7 @@ The crate is organized into several modules:
 Eventix fully supports timezone-aware datetime handling with automatic DST transitions:
 
 ```rust
-use Eventix::timezone;
+use eventix::timezone;
 
 // Parse timezone
 let tz = timezone::parse_timezone("America/New_York")?;
