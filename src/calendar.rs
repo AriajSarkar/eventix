@@ -88,6 +88,27 @@ impl Calendar {
         }
     }
 
+    /// Update an event by applying a function to it
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use eventix::{Calendar, Event};
+    ///
+    /// let mut cal = Calendar::new("My Calendar");
+    /// // ... add event ...
+    ///
+    /// cal.update_event(0, |event| {
+    ///     event.confirm();
+    /// });
+    /// ```
+    pub fn update_event<F>(&mut self, index: usize, f: F) -> Option<()>
+    where
+        F: FnOnce(&mut Event),
+    {
+        self.events.get_mut(index).map(f)
+    }
+
     /// Get all events in the calendar
     pub fn get_events(&self) -> &[Event] {
         &self.events

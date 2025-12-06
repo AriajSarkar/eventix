@@ -7,34 +7,31 @@ pub fn run() -> eventix::Result<()> {
 
     // 1. Create a Tentative Booking
     println!("1. Creating tentative booking for Client Meeting...");
-    let mut meeting = Event::builder()
+    let meeting = Event::builder()
         .title("Client Meeting")
         .start("2025-11-10 10:00:00", "UTC")
         .duration_hours(1)
         .status(EventStatus::Tentative)
         .build()?;
 
-    println!("   Status: {:?}", meeting.status);
-    cal.add_event(meeting.clone());
+    let meeting_status = meeting.status;
+    cal.add_event(meeting);
+    println!("   Status: {:?}", meeting_status);
 
     // 2. Confirm the Booking
     println!("\n2. Confirming the booking...");
-    // Retrieve the event (mutable borrow would happen in a real app, here we simulate)
-    meeting.confirm();
-    println!("   Status: {:?}", meeting.status);
-
-    // Update in calendar (remove old, add new for demo simplicity)
-    cal.clear_events();
-    cal.add_event(meeting.clone());
+    // Use the new update_event method to modify in-place
+    cal.update_event(0, |event| {
+        event.confirm();
+        println!("   Status: {:?}", event.status);
+    });
 
     // 3. Cancel the Booking
     println!("\n3. Cancelling the booking...");
-    meeting.cancel();
-    println!("   Status: {:?}", meeting.status);
-
-    // Update in calendar
-    cal.clear_events();
-    cal.add_event(meeting);
+    cal.update_event(0, |event| {
+        event.cancel();
+        println!("   Status: {:?}", event.status);
+    });
 
     // 4. Verify Gap Validation
     println!("\n4. Verifying availability...");
