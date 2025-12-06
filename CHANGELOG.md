@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-12-06
+
+### Added
+- **GitHub Actions Workflows**: Added `release.yml` and `rust.yml` for automated CI/CD and releases.
+- **Rustfmt**: Added `rustfmt.toml` to enforce consistent code style.
+
+### Changed
+- **Refactoring**: Significant systematic CI improvements and codebase refactoring.
+- **Features**: Consolidated calendar and event management features including timezone handling, recurrence, ICS, and gap validation.
+- **Documentation**: Updated `README.md` and refined examples for better clarity.
+
 ## [0.1.2] - 2025-10-26
 
 ### Improved
@@ -57,5 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive test suite (56 tests)
 - Complete documentation with examples
 
+[0.2.0]: https://github.com/AriajSarkar/eventix/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/AriajSarkar/eventix/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/AriajSarkar/eventix/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/AriajSarkar/eventix/releases/tag/v0.1.0

@@ -1,13 +1,13 @@
 //! Gap and overlap validation for calendar events
-//! 
+//!
 //! This module provides functionality to detect gaps between events,
 //! find overlapping events, and analyze schedule density - features
 //! not commonly found in other calendar libraries.
 
-use chrono::{DateTime, Duration};
-use chrono_tz::Tz;
 use crate::calendar::Calendar;
 use crate::error::Result;
+use chrono::{DateTime, Duration};
+use chrono_tz::Tz;
 
 /// Represents a time gap between two events
 #[derive(Debug, Clone)]
@@ -140,7 +140,7 @@ impl ScheduleDensity {
 /// use chrono::Duration;
 ///
 /// let mut cal = Calendar::new("Test");
-/// 
+///
 /// let event1 = Event::builder()
 ///     .title("Meeting 1")
 ///     .start("2025-11-01 09:00:00", "UTC")
@@ -172,37 +172,33 @@ pub fn find_gaps(
     min_gap_duration: Duration,
 ) -> Result<Vec<TimeGap>> {
     let mut occurrences = calendar.events_between(start, end)?;
-    
+
     // Sort by start time
     occurrences.sort_by_key(|o| o.occurrence_time);
-    
+
     let mut gaps = Vec::new();
     let mut current_time = start;
-    
+
     for occurrence in occurrences.iter() {
         let event_start = occurrence.occurrence_time;
-        
+
         // Check if there's a gap before this event
         if event_start > current_time {
-            let gap = TimeGap::new(
-                current_time,
-                event_start,
-                None,
-                Some(occurrence.title().to_string()),
-            );
-            
+            let gap =
+                TimeGap::new(current_time, event_start, None, Some(occurrence.title().to_string()));
+
             if gap.duration >= min_gap_duration {
                 gaps.push(gap);
             }
         }
-        
+
         // Move current time to end of this event
         let event_end = occurrence.end_time();
         if event_end > current_time {
             current_time = event_end;
         }
     }
-    
+
     // Check for gap at the end
     if end > current_time {
         let gap = TimeGap::new(current_time, end, None, None);
@@ -210,7 +206,7 @@ pub fn find_gaps(
             gaps.push(gap);
         }
     }
-    
+
     Ok(gaps)
 }
 
@@ -223,7 +219,7 @@ pub fn find_gaps(
 /// use eventix::timezone::parse_datetime_with_tz;
 ///
 /// let mut cal = Calendar::new("Test");
-/// 
+///
 /// let event1 = Event::builder()
 ///     .title("Meeting 1")
 ///     .start("2025-11-01 09:00:00", "UTC")
@@ -255,34 +251,34 @@ pub fn find_overlaps(
 ) -> Result<Vec<EventOverlap>> {
     let occurrences = calendar.events_between(start, end)?;
     let mut overlaps = Vec::new();
-    
+
     // Check each pair of events for overlap
     for i in 0..occurrences.len() {
         for j in (i + 1)..occurrences.len() {
             let event1 = &occurrences[i];
             let event2 = &occurrences[j];
-            
+
             let start1 = event1.occurrence_time;
             let end1 = event1.end_time();
             let start2 = event2.occurrence_time;
             let end2 = event2.end_time();
-            
+
             // Check if they overlap
             if start1 < end2 && start2 < end1 {
                 let overlap_start = start1.max(start2);
                 let overlap_end = end1.min(end2);
-                
+
                 let overlap = EventOverlap::new(
                     overlap_start,
                     overlap_end,
                     vec![event1.title().to_string(), event2.title().to_string()],
                 );
-                
+
                 overlaps.push(overlap);
             }
         }
     }
-    
+
     Ok(overlaps)
 }
 
@@ -295,7 +291,7 @@ pub fn find_overlaps(
 /// use eventix::timezone::parse_datetime_with_tz;
 ///
 /// let mut cal = Calendar::new("Test");
-/// 
+///
 /// let event = Event::builder()
 ///     .title("Meeting")
 ///     .start("2025-11-01 09:00:00", "UTC")
@@ -319,27 +315,27 @@ pub fn calculate_density(
 ) -> Result<ScheduleDensity> {
     let total_duration = end.signed_duration_since(start);
     let occurrences = calendar.events_between(start, end)?;
-    
+
     // Calculate busy time
     let mut busy_duration = Duration::zero();
     for occurrence in occurrences.iter() {
         let event_start = occurrence.occurrence_time.max(start);
         let event_end = occurrence.end_time().min(end);
         if event_end > event_start {
-            busy_duration = busy_duration + event_end.signed_duration_since(event_start);
+            busy_duration += event_end.signed_duration_since(event_start);
         }
     }
-    
+
     let free_duration = total_duration - busy_duration;
     let occupancy_percentage = if total_duration.num_seconds() > 0 {
         (busy_duration.num_seconds() as f64 / total_duration.num_seconds() as f64) * 100.0
     } else {
         0.0
     };
-    
+
     let gaps = find_gaps(calendar, start, end, Duration::minutes(0))?;
     let overlaps = find_overlaps(calendar, start, end)?;
-    
+
     Ok(ScheduleDensity {
         total_duration,
         busy_duration,
@@ -385,23 +381,56 @@ pub fn is_slot_available(
     // a wider range - start from beginning of day or before slot_start
     let query_start = slot_start - Duration::days(1);
     let occurrences = calendar.events_between(query_start, slot_end)?;
-    
+
     for occurrence in occurrences.iter() {
         let event_start = occurrence.occurrence_time;
         let event_end = occurrence.end_time();
-        
+
         // Check for any overlap between event and slot
         if event_start < slot_end && slot_start < event_end {
             return Ok(false);
         }
     }
-    
+
     Ok(true)
 }
 
 /// Suggest alternative times for a conflicting event
 ///
 /// Finds available slots near the requested time.
+///
+/// # Examples
+///
+/// ```
+/// use eventix::{Calendar, Event, gap_validation};
+/// use eventix::timezone::parse_datetime_with_tz;
+/// use chrono::Duration;
+///
+/// let mut cal = Calendar::new("Test");
+/// let tz = eventix::timezone::parse_timezone("UTC").unwrap();
+///
+/// // Existing event 9-10
+/// let event = Event::builder()
+///     .title("Meeting")
+///     .start("2025-11-01 09:00:00", "UTC")
+///     .duration_hours(1)
+///     .build()
+///     .unwrap();
+/// cal.add_event(event);
+///
+/// // Attempt to schedule 9:30-10:30 (conflict)
+/// let requested = parse_datetime_with_tz("2025-11-01 09:30:00", tz).unwrap();
+///
+/// // Find alternatives within +/- 4 hours
+/// let alternatives = gap_validation::suggest_alternatives(
+///     &cal,
+///     requested,
+///     Duration::hours(1), // 1 hour duration
+///     Duration::hours(4)  // Search window
+/// ).unwrap();
+///
+/// assert!(alternatives.len() > 0);
+/// ```
 pub fn suggest_alternatives(
     calendar: &Calendar,
     requested_start: DateTime<Tz>,
@@ -410,25 +439,25 @@ pub fn suggest_alternatives(
 ) -> Result<Vec<DateTime<Tz>>> {
     let search_start = requested_start - search_window;
     let search_end = requested_start + search_window;
-    
+
     let gaps = find_gaps(calendar, search_start, search_end, duration)?;
-    
+
     let mut suggestions = Vec::new();
     for gap in gaps {
         // Check if the requested duration fits in this gap
         if gap.duration >= duration {
             // Suggest the start of the gap
             suggestions.push(gap.start);
-            
+
             // Also suggest slots within the gap if it's large enough
             let mut slot_start = gap.start + Duration::hours(1);
             while slot_start + duration <= gap.end {
                 suggestions.push(slot_start);
-                slot_start = slot_start + Duration::hours(1);
+                slot_start += Duration::hours(1);
             }
         }
     }
-    
+
     suggestions.sort();
     Ok(suggestions)
 }
@@ -436,35 +465,35 @@ pub fn suggest_alternatives(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::timezone::parse_datetime_with_tz;
     use crate::Calendar;
     use crate::Event;
-    use crate::timezone::parse_datetime_with_tz;
 
     fn create_test_calendar() -> Result<Calendar> {
         let mut cal = Calendar::new("Test Calendar");
-        
+
         let event1 = Event::builder()
             .title("Morning Meeting")
             .start("2025-11-01 09:00:00", "UTC")
             .duration_hours(1)
             .build()?;
-        
+
         let event2 = Event::builder()
             .title("Lunch")
             .start("2025-11-01 12:00:00", "UTC")
             .duration_hours(1)
             .build()?;
-        
+
         let event3 = Event::builder()
             .title("Afternoon Meeting")
             .start("2025-11-01 15:00:00", "UTC")
             .duration_hours(2)
             .build()?;
-        
+
         cal.add_event(event1);
         cal.add_event(event2);
         cal.add_event(event3);
-        
+
         Ok(cal)
     }
 
@@ -474,9 +503,9 @@ mod tests {
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
         let start = parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
         let end = parse_datetime_with_tz("2025-11-01 18:00:00", tz).unwrap();
-        
+
         let gaps = find_gaps(&cal, start, end, Duration::minutes(30)).unwrap();
-        
+
         // Should find gaps: 8-9am, 10am-12pm, 1-3pm, 5-6pm
         assert!(gaps.len() >= 3);
     }
@@ -487,9 +516,9 @@ mod tests {
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
         let start = parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
         let end = parse_datetime_with_tz("2025-11-01 18:00:00", tz).unwrap();
-        
+
         let overlaps = find_overlaps(&cal, start, end).unwrap();
-        
+
         // No overlapping events in our test calendar
         assert_eq!(overlaps.len(), 0);
     }
@@ -497,30 +526,30 @@ mod tests {
     #[test]
     fn test_find_overlaps_with_conflict() {
         let mut cal = Calendar::new("Test");
-        
+
         let event1 = Event::builder()
             .title("Meeting 1")
             .start("2025-11-01 09:00:00", "UTC")
             .duration_hours(2)
             .build()
             .unwrap();
-        
+
         let event2 = Event::builder()
             .title("Meeting 2")
             .start("2025-11-01 10:00:00", "UTC")
             .duration_hours(1)
             .build()
             .unwrap();
-        
+
         cal.add_event(event1);
         cal.add_event(event2);
-        
+
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
         let start = parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
         let end = parse_datetime_with_tz("2025-11-01 18:00:00", tz).unwrap();
-        
+
         let overlaps = find_overlaps(&cal, start, end).unwrap();
-        
+
         assert_eq!(overlaps.len(), 1);
         assert_eq!(overlaps[0].duration_minutes(), 60);
     }
@@ -531,9 +560,9 @@ mod tests {
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
         let start = parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
         let end = parse_datetime_with_tz("2025-11-01 18:00:00", tz).unwrap();
-        
+
         let density = calculate_density(&cal, start, end).unwrap();
-        
+
         assert_eq!(density.event_count, 3);
         assert!(density.occupancy_percentage > 0.0);
         assert!(density.occupancy_percentage < 100.0);
@@ -544,12 +573,12 @@ mod tests {
     fn test_is_slot_available() {
         let cal = create_test_calendar().unwrap();
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
-        
+
         // Available slot
         let slot_start = parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
         let slot_end = parse_datetime_with_tz("2025-11-01 11:00:00", tz).unwrap();
         assert!(is_slot_available(&cal, slot_start, slot_end).unwrap());
-        
+
         // Conflicting slot
         let conflict_start = parse_datetime_with_tz("2025-11-01 09:30:00", tz).unwrap();
         let conflict_end = parse_datetime_with_tz("2025-11-01 10:30:00", tz).unwrap();
@@ -562,9 +591,9 @@ mod tests {
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
         let start = parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
         let end = parse_datetime_with_tz("2025-11-01 18:00:00", tz).unwrap();
-        
+
         let longest = find_longest_gap(&cal, start, end).unwrap();
-        
+
         assert!(longest.is_some());
         let gap = longest.unwrap();
         assert!(gap.duration_minutes() >= 120); // At least 2 hours
@@ -576,10 +605,10 @@ mod tests {
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
         let start = parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
         let end = parse_datetime_with_tz("2025-11-01 18:00:00", tz).unwrap();
-        
+
         // Find slots for 1-hour meeting
         let slots = find_available_slots(&cal, start, end, Duration::hours(1)).unwrap();
-        
+
         assert!(slots.len() > 0);
         for slot in slots {
             assert!(slot.duration >= Duration::hours(1));
@@ -590,24 +619,20 @@ mod tests {
     fn test_suggest_alternatives() {
         let cal = create_test_calendar().unwrap();
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
-        
+
         // Try to schedule during morning meeting (conflict)
         let requested = parse_datetime_with_tz("2025-11-01 09:30:00", tz).unwrap();
-        
-        let alternatives = suggest_alternatives(
-            &cal,
-            requested,
-            Duration::hours(1),
-            Duration::hours(4),
-        ).unwrap();
-        
+
+        let alternatives =
+            suggest_alternatives(&cal, requested, Duration::hours(1), Duration::hours(4)).unwrap();
+
         assert!(alternatives.len() > 0);
     }
 
     #[test]
     fn test_schedule_density_busy() {
         let mut cal = Calendar::new("Busy");
-        
+
         // Create a packed schedule
         for hour in 9..17 {
             let event = Event::builder()
@@ -618,13 +643,13 @@ mod tests {
                 .unwrap();
             cal.add_event(event);
         }
-        
+
         let tz = crate::timezone::parse_timezone("UTC").unwrap();
         let start = parse_datetime_with_tz("2025-11-01 09:00:00", tz).unwrap();
         let end = parse_datetime_with_tz("2025-11-01 17:00:00", tz).unwrap();
-        
+
         let density = calculate_density(&cal, start, end).unwrap();
-        
+
         assert!(density.is_busy());
         assert!(density.occupancy_percentage > 60.0);
     }

@@ -1,6 +1,6 @@
 //! Example demonstrating various recurrence patterns
 
-use eventix::{Calendar, Event, Recurrence, timezone};
+use eventix::{timezone, Calendar, Event, Recurrence};
 
 fn main() -> anyhow::Result<()> {
     println!("=== eventix Recurrence Example ===\n");
@@ -91,12 +91,12 @@ fn main() -> anyhow::Result<()> {
     // Display occurrences for one of the recurring events
     println!("\n=== Sample Occurrences ===");
     let sample_event = &cal.get_events()[0]; // Daily exercise
-    
+
     let start_date = timezone::parse_datetime_with_tz("2025-11-01 00:00:00", tz)?;
     let end_date = timezone::parse_datetime_with_tz("2025-11-15 23:59:59", tz)?;
-    
+
     let occurrences = sample_event.occurrences_between(start_date, end_date, 50)?;
-    
+
     println!("\n'{}' occurrences (first 15 days):", sample_event.title);
     for (i, occurrence) in occurrences.iter().enumerate().take(15) {
         println!("  {}. {}", i + 1, occurrence.format("%Y-%m-%d %A %H:%M"));
@@ -105,11 +105,11 @@ fn main() -> anyhow::Result<()> {
     // Show calendar summary
     println!("\n=== Calendar Summary ===");
     println!("Total recurring event patterns: {}", cal.event_count());
-    
+
     // Calculate total occurrences in November 2025
     let nov_start = timezone::parse_datetime_with_tz("2025-11-01 00:00:00", tz)?;
     let nov_end = timezone::parse_datetime_with_tz("2025-11-30 23:59:59", tz)?;
-    
+
     let all_occurrences = cal.events_between(nov_start, nov_end)?;
     println!("Total occurrences in November 2025: {}", all_occurrences.len());
 
@@ -117,11 +117,9 @@ fn main() -> anyhow::Result<()> {
     println!("\n=== Events on November 5, 2025 ===");
     let specific_date = timezone::parse_datetime_with_tz("2025-11-05 00:00:00", tz)?;
     let events_on_date = cal.events_on_date(specific_date)?;
-    
+
     for occurrence in events_on_date {
-        println!("  - {} at {}", 
-            occurrence.title(), 
-            occurrence.occurrence_time.format("%H:%M"));
+        println!("  - {} at {}", occurrence.title(), occurrence.occurrence_time.format("%H:%M"));
     }
 
     Ok(())

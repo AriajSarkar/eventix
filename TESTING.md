@@ -122,12 +122,12 @@ Demonstrates:
 | Calendar Management | ✅ | ✅ | ✅ | ✅ |
 | Event Building | ✅ | ✅ | ✅ | ✅ |
 | Recurrence Patterns | ✅ | ✅ | ✅ | ✅ |
-| ICS Import/Export | ✅ | ❌ | ✅ | ✅ |
+| ICS Import/Export | ✅ | ✅ | ✅ | ✅ |
 | Timezone Support | ✅ | ✅ | ✅ | ✅ |
 | Gap Detection | ✅ | ✅ | ✅ | ✅ |
 | Overlap Detection | ✅ | ✅ | ✅ | ✅ |
 | Schedule Analysis | ✅ | ✅ | ✅ | ✅ |
-| Conflict Resolution | ✅ | ✅ | ❌ | ✅ |
+| Conflict Resolution | ✅ | ✅ | ✅ | ✅ |
 
 ## Unique Features (Not in Other Crates)
 

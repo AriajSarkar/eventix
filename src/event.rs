@@ -1,44 +1,44 @@
 //! Event types and builder API
 
-use chrono::{DateTime, Duration, TimeZone};
-use chrono_tz::Tz;
 use crate::error::{EventixError, Result};
 use crate::recurrence::{Recurrence, RecurrenceFilter};
-use crate::timezone::{parse_timezone, parse_datetime_with_tz};
+use crate::timezone::{parse_datetime_with_tz, parse_timezone};
+use chrono::{DateTime, Duration, TimeZone};
+use chrono_tz::Tz;
 
 /// A calendar event with timezone-aware start and end times
 #[derive(Debug, Clone)]
 pub struct Event {
     /// Event title
     pub title: String,
-    
+
     /// Optional description
     pub description: Option<String>,
-    
+
     /// Start time with timezone
     pub start_time: DateTime<Tz>,
-    
+
     /// End time with timezone
     pub end_time: DateTime<Tz>,
-    
+
     /// Timezone for the event
     pub timezone: Tz,
-    
+
     /// Optional list of attendees
     pub attendees: Vec<String>,
-    
+
     /// Optional recurrence pattern
     pub recurrence: Option<Recurrence>,
-    
+
     /// Optional recurrence filter (skip weekends, holidays, etc.)
     pub recurrence_filter: Option<RecurrenceFilter>,
-    
+
     /// Specific dates to exclude from recurrence
     pub exdates: Vec<DateTime<Tz>>,
-    
+
     /// Location of the event
     pub location: Option<String>,
-    
+
     /// Unique identifier for the event
     pub uid: Option<String>,
 }
@@ -73,23 +73,22 @@ impl Event {
         max_occurrences: usize,
     ) -> Result<Vec<DateTime<Tz>>> {
         if let Some(ref recurrence) = self.recurrence {
-            let mut occurrences = recurrence.generate_occurrences(self.start_time, max_occurrences)?;
-            
+            let mut occurrences =
+                recurrence.generate_occurrences(self.start_time, max_occurrences)?;
+
             // Filter by date range
             occurrences.retain(|dt| *dt >= start && *dt <= end);
-            
+
             // Apply recurrence filter if present
             if let Some(ref filter) = self.recurrence_filter {
                 occurrences = filter.filter_occurrences(occurrences);
             }
-            
+
             // Remove exception dates
             occurrences.retain(|dt| {
-                !self.exdates.iter().any(|exdate| {
-                    exdate.date_naive() == dt.date_naive()
-                })
+                !self.exdates.iter().any(|exdate| exdate.date_naive() == dt.date_naive())
             });
-            
+
             Ok(occurrences)
         } else {
             // Non-recurring event
@@ -103,12 +102,20 @@ impl Event {
 
     /// Check if this event occurs on a specific date
     pub fn occurs_on(&self, date: DateTime<Tz>) -> Result<bool> {
-        let start = date.date_naive().and_hms_opt(0, 0, 0).unwrap();
-        let end = date.date_naive().and_hms_opt(23, 59, 59).unwrap();
-        
-        let start_dt = self.timezone.from_local_datetime(&start).earliest().unwrap();
-        let end_dt = self.timezone.from_local_datetime(&end).latest().unwrap();
-        
+        let start = date.date_naive().and_hms_opt(0, 0, 0).ok_or_else(|| {
+            EventixError::ValidationError("Invalid start time for date check".to_string())
+        })?;
+        let end = date.date_naive().and_hms_opt(23, 59, 59).ok_or_else(|| {
+            EventixError::ValidationError("Invalid end time for date check".to_string())
+        })?;
+
+        let start_dt = self.timezone.from_local_datetime(&start).earliest().ok_or_else(|| {
+            EventixError::ValidationError("Ambiguous start time for date check".to_string())
+        })?;
+        let end_dt = self.timezone.from_local_datetime(&end).latest().ok_or_else(|| {
+            EventixError::ValidationError("Ambiguous end time for date check".to_string())
+        })?;
+
         let occurrences = self.occurrences_between(start_dt, end_dt, 1)?;
         Ok(!occurrences.is_empty())
     }
@@ -278,21 +285,25 @@ impl EventBuilder {
 
     /// Build the event
     pub fn build(self) -> Result<Event> {
-        let title = self.title.ok_or_else(|| 
-            EventixError::ValidationError("Event title is required".to_string()))?;
-        
-        let start_time = self.start_time.ok_or_else(|| 
-            EventixError::ValidationError("Event start time is required".to_string()))?;
-        
-        let end_time = self.end_time.ok_or_else(|| 
-            EventixError::ValidationError("Event end time is required".to_string()))?;
-        
-        let timezone = self.timezone.ok_or_else(|| 
-            EventixError::ValidationError("Event timezone is required".to_string()))?;
+        let title = self
+            .title
+            .ok_or_else(|| EventixError::ValidationError("Event title is required".to_string()))?;
+
+        let start_time = self.start_time.ok_or_else(|| {
+            EventixError::ValidationError("Event start time is required".to_string())
+        })?;
+
+        let end_time = self.end_time.ok_or_else(|| {
+            EventixError::ValidationError("Event end time is required".to_string())
+        })?;
+
+        let timezone = self.timezone.ok_or_else(|| {
+            EventixError::ValidationError("Event timezone is required".to_string())
+        })?;
 
         if end_time <= start_time {
             return Err(EventixError::ValidationError(
-                "Event end time must be after start time".to_string()
+                "Event end time must be after start time".to_string(),
             ));
         }
 
@@ -342,10 +353,7 @@ mod tests {
     #[test]
     fn test_event_validation() {
         // Missing title
-        let result = Event::builder()
-            .start("2025-11-01 10:00:00", "UTC")
-            .duration_hours(1)
-            .build();
+        let result = Event::builder().start("2025-11-01 10:00:00", "UTC").duration_hours(1).build();
         assert!(result.is_err());
 
         // End before start

@@ -22,5 +22,6 @@ Thumbs.db
 work_calendar.ics
 calendar.ics
 
-# Usage examples (uses published crate)
-/usage-examples/
+
+# Example output files
+examples_output/
