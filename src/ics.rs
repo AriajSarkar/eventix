@@ -168,7 +168,7 @@ fn event_to_ical(event: &Event) -> Result<IEvent> {
         let rrule_str = recurrence.to_rrule_string(event.start_time)?;
         // Extract just the RRULE part
         if let Some(rrule_part) = rrule_str.lines().find(|l| l.starts_with("RRULE:")) {
-            let rrule_value = rrule_part.strip_prefix("RRULE:").unwrap();
+            let rrule_value = rrule_part.strip_prefix("RRULE:").unwrap_or(rrule_part);
             ical_event.add_property("RRULE", rrule_value);
         }
     }

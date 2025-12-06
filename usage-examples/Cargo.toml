@@ -1,0 +1,10 @@
+[package]
+name = "eventix-usage-examples"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+eventix = { path = ".." }
+anyhow = "1.0"
+chrono = "0.4"

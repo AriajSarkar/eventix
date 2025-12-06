@@ -64,9 +64,18 @@ fn main() -> anyhow::Result<()> {
     println!("Created calendar '{}' with {} events\n", cal.name, cal.event_count());
 
     // Export to ICS file
-    let ics_path = "work_calendar.ics";
-    println!("Exporting to {}...", ics_path);
-    cal.export_to_ics(ics_path)?;
+    // Export to ICS file
+    let output_dir = Path::new("examples_output");
+    if !output_dir.exists() {
+        std::fs::create_dir(output_dir)?;
+    }
+
+    let ics_path = output_dir.join("work_calendar.ics");
+    // Convert path to string for display/usage if needed, or pass path directly
+    let ics_path_str = ics_path.to_str().unwrap();
+
+    println!("Exporting to {}...", ics_path_str);
+    cal.export_to_ics(&ics_path)?;
     println!("✓ Export successful!\n");
 
     // Display the ICS content
@@ -78,7 +87,7 @@ fn main() -> anyhow::Result<()> {
 
     // Import the calendar back
     println!("=== Importing from ICS ===");
-    let imported_cal = Calendar::import_from_ics(ics_path)?;
+    let imported_cal = Calendar::import_from_ics(&ics_path)?;
 
     println!("Imported calendar: {}", imported_cal.name);
     if let Some(desc) = &imported_cal.description {
@@ -116,8 +125,8 @@ fn main() -> anyhow::Result<()> {
 
     // Clean up
     println!("\n=== Cleanup ===");
-    if Path::new(ics_path).exists() {
-        std::fs::remove_file(ics_path)?;
+    if ics_path.exists() {
+        std::fs::remove_file(&ics_path)?;
         println!("✓ Removed temporary ICS file");
     }
 

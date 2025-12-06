@@ -1,6 +1,6 @@
 //! Calendar type for managing collections of events
 
-use crate::error::Result;
+use crate::error::{EventixError, Result};
 use crate::event::Event;
 use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
@@ -150,12 +150,24 @@ impl Calendar {
 
     /// Get all events occurring on a specific date
     pub fn events_on_date(&self, date: DateTime<Tz>) -> Result<Vec<EventOccurrence<'_>>> {
-        let start = date.date_naive().and_hms_opt(0, 0, 0).unwrap();
-        let end = date.date_naive().and_hms_opt(23, 59, 59).unwrap();
+        let start = date
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| EventixError::ValidationError("Invalid start time".to_string()))?;
+        let end = date
+            .date_naive()
+            .and_hms_opt(23, 59, 59)
+            .ok_or_else(|| EventixError::ValidationError("Invalid end time".to_string()))?;
 
         let tz = date.timezone();
-        let start_dt = tz.from_local_datetime(&start).earliest().unwrap();
-        let end_dt = tz.from_local_datetime(&end).latest().unwrap();
+        let start_dt = tz
+            .from_local_datetime(&start)
+            .earliest()
+            .ok_or_else(|| EventixError::ValidationError("Ambiguous start time".to_string()))?;
+        let end_dt = tz
+            .from_local_datetime(&end)
+            .latest()
+            .ok_or_else(|| EventixError::ValidationError("Ambiguous end time".to_string()))?;
 
         self.events_between(start_dt, end_dt)
     }

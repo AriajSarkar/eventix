@@ -102,11 +102,19 @@ impl Event {
 
     /// Check if this event occurs on a specific date
     pub fn occurs_on(&self, date: DateTime<Tz>) -> Result<bool> {
-        let start = date.date_naive().and_hms_opt(0, 0, 0).unwrap();
-        let end = date.date_naive().and_hms_opt(23, 59, 59).unwrap();
+        let start = date.date_naive().and_hms_opt(0, 0, 0).ok_or_else(|| {
+            EventixError::ValidationError("Invalid start time for date check".to_string())
+        })?;
+        let end = date.date_naive().and_hms_opt(23, 59, 59).ok_or_else(|| {
+            EventixError::ValidationError("Invalid end time for date check".to_string())
+        })?;
 
-        let start_dt = self.timezone.from_local_datetime(&start).earliest().unwrap();
-        let end_dt = self.timezone.from_local_datetime(&end).latest().unwrap();
+        let start_dt = self.timezone.from_local_datetime(&start).earliest().ok_or_else(|| {
+            EventixError::ValidationError("Ambiguous start time for date check".to_string())
+        })?;
+        let end_dt = self.timezone.from_local_datetime(&end).latest().ok_or_else(|| {
+            EventixError::ValidationError("Ambiguous end time for date check".to_string())
+        })?;
 
         let occurrences = self.occurrences_between(start_dt, end_dt, 1)?;
         Ok(!occurrences.is_empty())

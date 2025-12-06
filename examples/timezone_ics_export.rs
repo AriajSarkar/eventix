@@ -93,9 +93,18 @@ fn main() -> Result<()> {
     cal.add_event(tokyo_event);
 
     // Export to ICS
+    // Export to ICS
     println!("\n=== Exporting to ICS ===");
-    let ics_filename = "timezone_demo.ics";
-    cal.export_to_ics(ics_filename)?;
+
+    let output_dir = std::path::Path::new("examples_output");
+    if !output_dir.exists() {
+        std::fs::create_dir(output_dir)?;
+    }
+
+    let ics_path = output_dir.join("timezone_demo.ics");
+    let ics_filename = ics_path.to_str().unwrap();
+
+    cal.export_to_ics(&ics_path)?;
     println!("✅ Exported calendar to: {}", ics_filename);
 
     // Display the ICS content for inspection
