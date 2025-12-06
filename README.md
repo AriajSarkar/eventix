@@ -21,11 +21,11 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 
 ## Quick Start
 
-Add Eventix to your `Cargo.toml`:
+Add eventix to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-Eventix = "0.1"
+eventix = "0.2"
 ```
 
 ### Basic Usage
