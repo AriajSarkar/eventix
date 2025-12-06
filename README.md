@@ -36,7 +36,7 @@ Add eventix to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-eventix = "0.2"
+eventix = "0.3.0"
 ```
 
 ### Basic Usage
