@@ -71,10 +71,8 @@ fn main() -> anyhow::Result<()> {
     }
 
     let ics_path = output_dir.join("work_calendar.ics");
-    // Convert path to string for display/usage if needed, or pass path directly
-    let ics_path_str = ics_path.to_str().unwrap();
 
-    println!("Exporting to {}...", ics_path_str);
+    println!("Exporting to {}...", ics_path.display());
     cal.export_to_ics(&ics_path)?;
     println!("✓ Export successful!\n");
 

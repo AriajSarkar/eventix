@@ -102,10 +102,9 @@ fn main() -> Result<()> {
     }
 
     let ics_path = output_dir.join("timezone_demo.ics");
-    let ics_filename = ics_path.to_str().unwrap();
 
     cal.export_to_ics(&ics_path)?;
-    println!("✅ Exported calendar to: {}", ics_filename);
+    println!("✅ Exported calendar to: {}", ics_path.display());
 
     // Display the ICS content for inspection
     println!("\n=== ICS Content Preview ===");
@@ -124,7 +123,7 @@ fn main() -> Result<()> {
     println!("✓ Events with UTC timezone use standard Z suffix");
     println!("✓ Recurring events preserve timezone information");
     println!("✓ Exception dates respect timezone context");
-    println!("\nYou can import '{}' into:", ics_filename);
+    println!("\nYou can import '{}' into:", ics_path.display());
     println!("  • Google Calendar");
     println!("  • Microsoft Outlook");
     println!("  • Apple Calendar");
