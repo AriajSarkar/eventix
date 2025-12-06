@@ -54,6 +54,24 @@ fn test_rescheduling_resets_cancelled_status() {
 }
 
 #[test]
+fn test_rescheduling_validation() {
+    let mut event = Event::builder()
+        .title("Meeting")
+        .start("2025-11-01 10:00:00", "UTC")
+        .duration_hours(1)
+        .build()
+        .unwrap();
+
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let new_start = timezone::parse_datetime_with_tz("2025-11-02 10:00:00", tz).unwrap();
+    let invalid_end = timezone::parse_datetime_with_tz("2025-11-02 09:00:00", tz).unwrap();
+
+    // Should fail because end is before start
+    let result = event.reschedule(new_start, invalid_end);
+    assert!(result.is_err());
+}
+
+#[test]
 fn test_gap_validation_ignores_cancelled_events() {
     let mut cal = Calendar::new("Booking Calendar");
 
