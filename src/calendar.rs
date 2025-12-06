@@ -208,9 +208,7 @@ impl Calendar {
 
         let description = value["description"].as_str().map(|s| s.to_string());
 
-        let timezone = value["timezone"]
-            .as_str()
-            .and_then(|tz_str| parse_timezone(tz_str).ok());
+        let timezone = value["timezone"].as_str().and_then(|tz_str| parse_timezone(tz_str).ok());
 
         let mut calendar = Calendar {
             name,
@@ -258,9 +256,7 @@ impl Calendar {
                     attendees: event_val["attendees"]
                         .as_array()
                         .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                                .collect()
+                            arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
                         })
                         .unwrap_or_default(),
                     recurrence: None,

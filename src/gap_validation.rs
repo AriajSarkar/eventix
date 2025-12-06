@@ -184,12 +184,8 @@ pub fn find_gaps(
 
         // Check if there's a gap before this event
         if event_start > current_time {
-            let gap = TimeGap::new(
-                current_time,
-                event_start,
-                None,
-                Some(occurrence.title().to_string()),
-            );
+            let gap =
+                TimeGap::new(current_time, event_start, None, Some(occurrence.title().to_string()));
 
             if gap.duration >= min_gap_duration {
                 gaps.push(gap);

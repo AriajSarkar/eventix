@@ -180,18 +180,12 @@ impl Recurrence {
         }
 
         if let Some(ref weekdays) = self.by_weekday {
-            let days: Vec<String> = weekdays
-                .iter()
-                .map(|wd| format!("{:?}", wd).to_uppercase())
-                .collect();
+            let days: Vec<String> =
+                weekdays.iter().map(|wd| format!("{:?}", wd).to_uppercase()).collect();
             rrule_str.push_str(&format!(";BYDAY={}", days.join(",")));
         }
 
-        Ok(format!(
-            "DTSTART:{}\nRRULE:{}",
-            dtstart.format("%Y%m%dT%H%M%S"),
-            rrule_str
-        ))
+        Ok(format!("DTSTART:{}\nRRULE:{}", dtstart.format("%Y%m%dT%H%M%S"), rrule_str))
     }
 
     /// Generate occurrences for this recurrence pattern
@@ -208,10 +202,7 @@ impl Recurrence {
         let mut occurrences = Vec::new();
         let mut current = start;
 
-        let count_limit = self
-            .count
-            .unwrap_or(max_occurrences as u32)
-            .min(max_occurrences as u32);
+        let count_limit = self.count.unwrap_or(max_occurrences as u32).min(max_occurrences as u32);
 
         for _ in 0..count_limit {
             // Check until date if specified
@@ -327,10 +318,7 @@ impl RecurrenceFilter {
 
     /// Filter a list of occurrences
     pub fn filter_occurrences(&self, occurrences: Vec<DateTime<Tz>>) -> Vec<DateTime<Tz>> {
-        occurrences
-            .into_iter()
-            .filter(|dt| !self.should_skip(dt))
-            .collect()
+        occurrences.into_iter().filter(|dt| !self.should_skip(dt)).collect()
     }
 }
 

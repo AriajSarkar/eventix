@@ -92,10 +92,7 @@ pub fn convert_timezone(dt: &DateTime<Tz>, target_tz: Tz) -> DateTime<Tz> {
 /// ```
 pub fn is_dst(dt: &DateTime<Tz>) -> bool {
     let offset = dt.offset().fix();
-    let std_offset = dt
-        .timezone()
-        .offset_from_utc_date(&dt.naive_utc().date())
-        .fix();
+    let std_offset = dt.timezone().offset_from_utc_date(&dt.naive_utc().date()).fix();
     offset != std_offset
 }
 

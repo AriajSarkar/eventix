@@ -40,10 +40,7 @@ fn test_comprehensive_gap_detection() {
 
     // Verify gap durations
     for gap in &gaps {
-        assert!(
-            gap.duration_minutes() >= 30,
-            "Each gap should be at least 30 minutes"
-        );
+        assert!(gap.duration_minutes() >= 30, "Each gap should be at least 30 minutes");
     }
 }
 
@@ -88,14 +85,8 @@ fn test_overlap_detection_complex() {
 
     // Verify overlap details
     for overlap in &overlaps {
-        assert!(
-            overlap.event_count() >= 2,
-            "Each overlap should involve at least 2 events"
-        );
-        assert!(
-            overlap.duration_minutes() > 0,
-            "Overlap should have positive duration"
-        );
+        assert!(overlap.event_count() >= 2, "Each overlap should involve at least 2 events");
+        assert!(overlap.duration_minutes() > 0, "Overlap should have positive duration");
     }
 }
 
@@ -142,10 +133,7 @@ fn test_schedule_density_analysis() {
     let light_density = gap_validation::calculate_density(&light_cal, start, end).unwrap();
     let busy_density = gap_validation::calculate_density(&busy_cal, start, end).unwrap();
 
-    assert!(
-        light_density.is_light(),
-        "Light schedule should be detected"
-    );
+    assert!(light_density.is_light(), "Light schedule should be detected");
     assert!(busy_density.is_busy(), "Busy schedule should be detected");
     assert!(busy_density.occupancy_percentage > light_density.occupancy_percentage);
 }
@@ -184,10 +172,7 @@ fn test_find_available_slots_for_meeting() {
 
     // Verify all slots are long enough
     for slot in slots {
-        assert!(
-            slot.duration >= Duration::hours(2),
-            "Each slot should fit 2-hour meeting"
-        );
+        assert!(slot.duration >= Duration::hours(2), "Each slot should fit 2-hour meeting");
     }
 }
 
@@ -286,10 +271,7 @@ fn test_longest_gap_finder() {
     let gap = longest_gap.unwrap();
 
     // The gap between 9:30 and 16:00 should be the longest (6.5 hours)
-    assert!(
-        gap.duration_hours() >= 6,
-        "Longest gap should be at least 6 hours"
-    );
+    assert!(gap.duration_hours() >= 6, "Longest gap should be at least 6 hours");
 }
 
 #[test]
@@ -401,10 +383,7 @@ fn test_density_metrics_comprehensive() {
         (density.occupancy_percentage - 30.0).abs() < 1.0,
         "Should be approximately 30% occupied"
     );
-    assert!(
-        density.free_duration > density.busy_duration,
-        "Should have more free time"
-    );
+    assert!(density.free_duration > density.busy_duration, "Should have more free time");
     assert!(!density.has_conflicts(), "Should have no conflicts");
     // 30% is right at the boundary - not considered "light" (which is <30%)
     assert!(!density.is_busy(), "Should not be considered busy");

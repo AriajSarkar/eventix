@@ -86,10 +86,7 @@ impl Event {
 
             // Remove exception dates
             occurrences.retain(|dt| {
-                !self
-                    .exdates
-                    .iter()
-                    .any(|exdate| exdate.date_naive() == dt.date_naive())
+                !self.exdates.iter().any(|exdate| exdate.date_naive() == dt.date_naive())
             });
 
             Ok(occurrences)
@@ -108,11 +105,7 @@ impl Event {
         let start = date.date_naive().and_hms_opt(0, 0, 0).unwrap();
         let end = date.date_naive().and_hms_opt(23, 59, 59).unwrap();
 
-        let start_dt = self
-            .timezone
-            .from_local_datetime(&start)
-            .earliest()
-            .unwrap();
+        let start_dt = self.timezone.from_local_datetime(&start).earliest().unwrap();
         let end_dt = self.timezone.from_local_datetime(&end).latest().unwrap();
 
         let occurrences = self.occurrences_between(start_dt, end_dt, 1)?;
@@ -352,10 +345,7 @@ mod tests {
     #[test]
     fn test_event_validation() {
         // Missing title
-        let result = Event::builder()
-            .start("2025-11-01 10:00:00", "UTC")
-            .duration_hours(1)
-            .build();
+        let result = Event::builder().start("2025-11-01 10:00:00", "UTC").duration_hours(1).build();
         assert!(result.is_err());
 
         // End before start

@@ -42,11 +42,7 @@ fn main() -> anyhow::Result<()> {
     println!("Found {} gaps of at least 15 minutes:\n", gaps.len());
     for (i, gap) in gaps.iter().enumerate() {
         println!("  Gap {}:", i + 1);
-        println!(
-            "    Time: {} to {}",
-            gap.start.format("%H:%M"),
-            gap.end.format("%H:%M")
-        );
+        println!("    Time: {} to {}", gap.start.format("%H:%M"), gap.end.format("%H:%M"));
         println!(
             "    Duration: {} minutes ({:.1} hours)",
             gap.duration_minutes(),
@@ -66,18 +62,9 @@ fn main() -> anyhow::Result<()> {
     let density = gap_validation::calculate_density(&cal, work_start, work_end)?;
 
     println!("Schedule Metrics:");
-    println!(
-        "  Total Work Hours: {:.1}",
-        density.total_duration.num_minutes() as f64 / 60.0
-    );
-    println!(
-        "  Busy Time: {:.1} hours",
-        density.busy_duration.num_minutes() as f64 / 60.0
-    );
-    println!(
-        "  Free Time: {:.1} hours",
-        density.free_duration.num_minutes() as f64 / 60.0
-    );
+    println!("  Total Work Hours: {:.1}", density.total_duration.num_minutes() as f64 / 60.0);
+    println!("  Busy Time: {:.1} hours", density.busy_duration.num_minutes() as f64 / 60.0);
+    println!("  Free Time: {:.1} hours", density.free_duration.num_minutes() as f64 / 60.0);
     println!("  Occupancy: {:.1}%", density.occupancy_percentage);
     println!("  Total Events: {}", density.event_count);
     println!("  Gaps Found: {}", density.gap_count);
@@ -96,15 +83,8 @@ fn main() -> anyhow::Result<()> {
     println!("=== 3. Longest Available Time Slot ===");
     if let Some(longest) = gap_validation::find_longest_gap(&cal, work_start, work_end)? {
         println!("Longest available slot:");
-        println!(
-            "  Time: {} to {}",
-            longest.start.format("%H:%M"),
-            longest.end.format("%H:%M")
-        );
-        println!(
-            "  Duration: {:.1} hours",
-            longest.duration_minutes() as f64 / 60.0
-        );
+        println!("  Time: {} to {}", longest.start.format("%H:%M"), longest.end.format("%H:%M"));
+        println!("  Duration: {:.1} hours", longest.duration_minutes() as f64 / 60.0);
         println!("  Perfect for: Deep work, focused tasks, or important meetings\n");
     }
 

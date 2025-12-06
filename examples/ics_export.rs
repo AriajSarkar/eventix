@@ -61,11 +61,7 @@ fn main() -> anyhow::Result<()> {
 
     cal.add_event(review);
 
-    println!(
-        "Created calendar '{}' with {} events\n",
-        cal.name,
-        cal.event_count()
-    );
+    println!("Created calendar '{}' with {} events\n", cal.name, cal.event_count());
 
     // Export to ICS file
     let ics_path = "work_calendar.ics";
@@ -88,10 +84,7 @@ fn main() -> anyhow::Result<()> {
     if let Some(desc) = &imported_cal.description {
         println!("Description: {}", desc);
     }
-    println!(
-        "Number of events imported: {}\n",
-        imported_cal.event_count()
-    );
+    println!("Number of events imported: {}\n", imported_cal.event_count());
 
     // Display imported events
     println!("=== Imported Events ===");

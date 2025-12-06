@@ -273,20 +273,14 @@ fn extract_datetime_with_tz(ical_event: &IEvent, prop_name: &str) -> Result<(Dat
         }
     }
 
-    Err(EventixError::IcsError(format!(
-        "Property {} not found",
-        prop_name
-    )))
+    Err(EventixError::IcsError(format!("Property {} not found", prop_name)))
 }
 
 /// Parse an iCalendar datetime value string
 fn parse_ical_datetime_value(dt_str: &str, tz: Tz) -> Result<DateTime<Tz>> {
     // Format: YYYYMMDDTHHMMSS
     if dt_str.len() < 15 {
-        return Err(EventixError::DateTimeParse(format!(
-            "Invalid datetime format: {}",
-            dt_str
-        )));
+        return Err(EventixError::DateTimeParse(format!("Invalid datetime format: {}", dt_str)));
     }
 
     let year: i32 = dt_str[0..4]

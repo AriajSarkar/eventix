@@ -185,10 +185,7 @@ fn test_ics_round_trip_preserves_timezone() {
     // Verify event details are preserved
     let imported_event = &imported_cal.get_events()[0];
     assert_eq!(imported_event.title, "Test Event");
-    assert_eq!(
-        imported_event.description,
-        Some("Testing round-trip".to_string())
-    );
+    assert_eq!(imported_event.description, Some("Testing round-trip".to_string()));
     assert_eq!(imported_event.location, Some("Chicago Office".to_string()));
 }
 
