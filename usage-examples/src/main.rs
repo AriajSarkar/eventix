@@ -4,7 +4,9 @@
 
 use eventix::{gap_validation, timezone, Calendar, Duration, Event, Recurrence};
 
-fn main() -> anyhow::Result<()> {
+mod booking_workflow;
+
+fn main() -> eventix::Result<()> {
     println!("=== Using Published Eventix Crate ===\n");
 
     // Create a calendar
@@ -49,6 +51,8 @@ fn main() -> anyhow::Result<()> {
 
     cal.export_to_ics("examples_output/schedule.ics")?;
     println!("💾 Exported calendar to examples_output/schedule.ics");
+
+    booking_workflow::run()?;
 
     Ok(())
 }
