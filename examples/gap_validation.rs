@@ -2,8 +2,7 @@
 //!
 //! This showcases unique features not found in other calendar crates
 
-use chrono::Duration;
-use eventix::{gap_validation, timezone, Calendar, Event, Recurrence};
+use eventix::{gap_validation, timezone, Calendar, Duration, Event, Recurrence};
 
 fn main() -> anyhow::Result<()> {
     println!("=== eventix Gap Validation & Schedule Analysis ===\n");

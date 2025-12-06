@@ -6,6 +6,22 @@ use crate::timezone::{parse_datetime_with_tz, parse_timezone};
 use chrono::{DateTime, Duration, TimeZone};
 use chrono_tz::Tz;
 
+use serde::{Deserialize, Serialize};
+
+/// Status of an event in the booking lifecycle
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum EventStatus {
+    /// The event is confirmed and occupies time (default)
+    #[default]
+    Confirmed,
+    /// The event is tentative/provisional and occupies time
+    Tentative,
+    /// The event is cancelled and does NOT occupy time
+    Cancelled,
+    /// The time slot is blocked (similar to Confirmed)
+    Blocked,
+}
+
 /// A calendar event with timezone-aware start and end times
 #[derive(Debug, Clone)]
 pub struct Event {
@@ -41,6 +57,9 @@ pub struct Event {
 
     /// Unique identifier for the event
     pub uid: Option<String>,
+
+    /// Status of the event (Confirmed, Cancelled, etc.)
+    pub status: EventStatus,
 }
 
 impl Event {
@@ -124,6 +143,60 @@ impl Event {
     pub fn duration(&self) -> Duration {
         self.end_time.signed_duration_since(self.start_time)
     }
+
+    /// Check if the event is considered "active" (occupies time)
+    ///
+    /// Returns true for Confirmed, Tentative, and Blocked.
+    /// Returns false for Cancelled.
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.status,
+            EventStatus::Confirmed | EventStatus::Tentative | EventStatus::Blocked
+        )
+    }
+
+    /// Confirm the event
+    pub fn confirm(&mut self) {
+        self.status = EventStatus::Confirmed;
+    }
+
+    /// Cancel the event
+    pub fn cancel(&mut self) {
+        self.status = EventStatus::Cancelled;
+    }
+
+    /// Set the event as tentative
+    pub fn tentative(&mut self) {
+        self.status = EventStatus::Tentative;
+    }
+
+    /// Block the event (similar to Confirmed, but explicit)
+    pub fn block(&mut self) {
+        self.status = EventStatus::Blocked;
+    }
+
+    /// Reschedule the event to a new time
+    ///
+    /// This updates the start and end times. If the event was Cancelled,
+    /// it automatically resets the status to Confirmed.
+    ///
+    /// This also updates the event's timezone to match the new start time.
+    pub fn reschedule(&mut self, new_start: DateTime<Tz>, new_end: DateTime<Tz>) -> Result<()> {
+        if new_end <= new_start {
+            return Err(EventixError::ValidationError(
+                "Event end time must be after start time".to_string(),
+            ));
+        }
+        self.start_time = new_start;
+        self.end_time = new_end;
+        self.timezone = new_start.timezone();
+
+        // If rescheduling a cancelled event, assume it's valid again
+        if self.status == EventStatus::Cancelled {
+            self.status = EventStatus::Confirmed;
+        }
+        Ok(())
+    }
 }
 
 /// Builder for creating events with a fluent API
@@ -139,6 +212,7 @@ pub struct EventBuilder {
     exdates: Vec<DateTime<Tz>>,
     location: Option<String>,
     uid: Option<String>,
+    status: EventStatus,
 }
 
 impl EventBuilder {
@@ -156,6 +230,7 @@ impl EventBuilder {
             exdates: Vec::new(),
             location: None,
             uid: None,
+            status: EventStatus::default(),
         }
     }
 
@@ -283,6 +358,12 @@ impl EventBuilder {
         self
     }
 
+    /// Set the event status
+    pub fn status(mut self, status: EventStatus) -> Self {
+        self.status = status;
+        self
+    }
+
     /// Build the event
     pub fn build(self) -> Result<Event> {
         let title = self
@@ -319,6 +400,7 @@ impl EventBuilder {
             exdates: self.exdates,
             location: self.location,
             uid: self.uid,
+            status: self.status,
         })
     }
 }
