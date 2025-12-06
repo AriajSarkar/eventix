@@ -20,6 +20,16 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 - 📊 **Schedule analysis** - Occupancy metrics, conflict detection, availability finding
 - ✅ **Type-safe** - Leverages Rust's type system for correctness
 
+## Why Eventix?
+
+| Feature | `eventix` | `icalendar` | `chrono` |
+|---------|-----------|-------------|----------|
+| **Primary Goal** | Booking & Scheduling | File Parsing | Date/Time Math |
+| **Gap Finding** | ✅ Native Support | ❌ Manual Logic | ❌ Manual Logic |
+| **Booking State** | ✅ Confirmed/Cancelled | ❌ No Concept | ❌ No Concept |
+| **Timezone/DST** | ✅ Built-in (`chrono-tz`) | ⚠️ Partial | ✅ Built-in |
+| **Recurrence** | ✅ RRule + Exdates | ✅ RRule | ❌ None |
+
 ## Quick Start
 
 Add eventix to your `Cargo.toml`:
