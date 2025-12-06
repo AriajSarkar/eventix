@@ -77,17 +77,28 @@ jobs:
           else
             git commit -am "docs: update readme version to $VERSION [skip ci]"
             git push origin main
+            
+            # Export commit SHA for next step
+            echo "README_COMMIT_SHA=$(git rev-parse HEAD)" >> $GITHUB_ENV
             echo "Pushed README update to main"
           fi
 
-      - name: Merge main into dev
+      - name: Sync README update to dev
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          echo "Merging main into dev..."
+          echo "Syncing README update to dev..."
           
           git checkout dev
           git pull origin dev --rebase
-          git merge origin/main -m "merge: sync main to dev after release $VERSION"
-          git push origin dev
-          echo "Merged main into dev"
+          
+          # Cherry-pick the specific commit from main
+          # This ensures ONLY the readme version change is brought over, 
+          # not the entire history of main if it differs.
+          if [ -n "${{ env.README_COMMIT_SHA }}" ]; then
+             git cherry-pick ${{ env.README_COMMIT_SHA }}
+             git push origin dev
+             echo "Cherry-picked readme update to dev"
+          else
+             echo "No readme change to sync"
+          fi
