@@ -50,6 +50,7 @@ fn test_rescheduling_resets_cancelled_status() {
     event.reschedule(new_start, new_end).unwrap();
 
     assert_eq!(event.start_time, new_start);
+    assert_eq!(event.end_time, new_end);
     assert_eq!(event.status, EventStatus::Confirmed); // Should be reset to Confirmed
 }
 
@@ -112,6 +113,9 @@ fn test_gap_validation_ignores_cancelled_events() {
 
     // The gap should be from 10:00 to 11:00 because the middle event is cancelled
     let gaps = gap_validation::find_gaps(&cal, start, end, Duration::minutes(30)).unwrap();
+
+    // Should have exactly 3 gaps: 08-09, 10-11, 12-13
+    assert_eq!(gaps.len(), 3, "Expected 3 gaps in the schedule");
 
     // Gaps:
     // 08:00 - 09:00 (1h)
