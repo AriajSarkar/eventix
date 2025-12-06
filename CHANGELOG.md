@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0]
 - Initial release with core features:
-    - Timezone-aware events
-    - Recurrence patterns (daily, weekly, monthly, yearly)
-    - Exception dates
-    - Gap validation and schedule optimization logic
-    - ICS file import/export support
+  - Timezone-aware events
+  - Recurrence patterns (daily, weekly, monthly, yearly)
+  - Exception dates
+  - Gap validation and schedule optimization logic
+  - ICS file import/export support

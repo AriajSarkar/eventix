@@ -96,7 +96,13 @@ impl Calendar {
     /// use eventix::{Calendar, Event};
     ///
     /// let mut cal = Calendar::new("My Calendar");
-    /// // ... add event ...
+    /// let event = Event::builder()
+    ///     .title("Meeting")
+    ///     .start("2025-11-01 10:00:00", "UTC")
+    ///     .duration_hours(1)
+    ///     .build()
+    ///     .unwrap();
+    /// cal.add_event(event);
     ///
     /// cal.update_event(0, |event| {
     ///     event.confirm();
@@ -389,12 +395,14 @@ mod tests {
         cal.add_event(event);
 
         // Update successful
+        // Update successful
         let updated = cal.update_event(0, |e| {
-            e.confirm(); // Was already confirmed, but testing the closure execution
+            e.cancel(); // Change status to test closure execution
             e.title = "Updated Title".to_string();
         });
         assert!(updated.is_some());
         assert_eq!(cal.events[0].title, "Updated Title");
+        assert!(!cal.events[0].is_active()); // Verify status was changed
 
         // Update invalid index
         let result = cal.update_event(99, |_| {});
