@@ -3,8 +3,7 @@
 //! These tests validate the unique gap detection and schedule analysis
 //! features that set eventix apart from other calendar crates.
 
-use chrono::Duration;
-use eventix::{gap_validation, timezone, Calendar, Event, Recurrence};
+use eventix::{gap_validation, timezone, Calendar, Duration, Event, Recurrence};
 
 #[test]
 fn test_comprehensive_gap_detection() {

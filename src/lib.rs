@@ -61,8 +61,7 @@
 //! Find gaps, detect conflicts, and analyze schedule density:
 //!
 //! ```rust
-//! use eventix::{Calendar, Event, gap_validation, timezone};
-//! use chrono::Duration;
+//! use eventix::{Calendar, Event, gap_validation, timezone, Duration};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut cal = Calendar::new("Work Schedule");

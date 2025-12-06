@@ -186,8 +186,7 @@ let events = cal.events_on_date(date)?;
 **Unique to Eventix** - Features not found in other calendar crates:
 
 ```rust
-use eventix::{Calendar, Event, gap_validation, timezone};
-use chrono::Duration;
+use eventix::{Calendar, Event, Duration, gap_validation, timezone};
 
 let mut cal = Calendar::new("Work Schedule");
 // ... add events ...
