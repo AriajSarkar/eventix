@@ -395,7 +395,6 @@ mod tests {
         cal.add_event(event);
 
         // Update successful
-        // Update successful
         let updated = cal.update_event(0, |e| {
             e.cancel(); // Change status to test closure execution
             e.title = "Updated Title".to_string();
