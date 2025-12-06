@@ -126,7 +126,7 @@ mod error;
 
 pub use calendar::Calendar;
 pub use error::{EventixError, Result};
-pub use event::{Event, EventBuilder};
+pub use event::{Event, EventBuilder, EventStatus};
 pub use recurrence::Recurrence;
 
 // Re-export commonly used types

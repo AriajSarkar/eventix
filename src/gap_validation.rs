@@ -173,6 +173,9 @@ pub fn find_gaps(
 ) -> Result<Vec<TimeGap>> {
     let mut occurrences = calendar.events_between(start, end)?;
 
+    // Filter out inactive events (e.g. Cancelled)
+    occurrences.retain(|e| e.event.is_active());
+
     // Sort by start time
     occurrences.sort_by_key(|o| o.occurrence_time);
 
@@ -249,7 +252,11 @@ pub fn find_overlaps(
     start: DateTime<Tz>,
     end: DateTime<Tz>,
 ) -> Result<Vec<EventOverlap>> {
-    let occurrences = calendar.events_between(start, end)?;
+    let mut occurrences = calendar.events_between(start, end)?;
+
+    // Filter out inactive events
+    occurrences.retain(|e| e.event.is_active());
+
     let mut overlaps = Vec::new();
 
     // Check each pair of events for overlap
@@ -314,7 +321,10 @@ pub fn calculate_density(
     end: DateTime<Tz>,
 ) -> Result<ScheduleDensity> {
     let total_duration = end.signed_duration_since(start);
-    let occurrences = calendar.events_between(start, end)?;
+    let mut occurrences = calendar.events_between(start, end)?;
+
+    // Filter out inactive events
+    occurrences.retain(|e| e.event.is_active());
 
     // Calculate busy time
     let mut busy_duration = Duration::zero();
@@ -383,6 +393,9 @@ pub fn is_slot_available(
     let occurrences = calendar.events_between(query_start, slot_end)?;
 
     for occurrence in occurrences.iter() {
+        if !occurrence.event.is_active() {
+            continue;
+        }
         let event_start = occurrence.occurrence_time;
         let event_end = occurrence.end_time();
 

@@ -276,6 +276,7 @@ impl Calendar {
                     exdates: Vec::new(),
                     location: event_val["location"].as_str().map(|s| s.to_string()),
                     uid: event_val["uid"].as_str().map(|s| s.to_string()),
+                    status: crate::event::EventStatus::default(), // Default to Confirmed if missing
                 };
 
                 calendar.add_event(event);
