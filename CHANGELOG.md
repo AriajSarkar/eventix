@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **[BREAKING]** `Event` struct now has a public `status` field.
-- **[BREAKING]** `EventBuilder` struct now has a `status` field.
+- **[BREAKING]** `EventBuilder` now has a public `.status()` method.
 - **[BREAKING]** `Event` struct now has a public `is_active()` method.
 
 ## [0.2.0] - 2025-12-06
