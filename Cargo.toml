@@ -10,7 +10,17 @@ readme = "README.md"
 homepage = "https://github.com/AriajSarkar/eventix"
 keywords = ["calendar", "scheduling", "booking", "availability", "ics"]
 categories = ["date-and-time"]
-exclude = ["usage-examples/"]
+exclude = [
+    "usage-examples/",
+    "examples_output/",
+    ".github/",
+    "target/",
+    "TODO.md",
+    "DEVELOPMENT.md",
+    "TESTING.md",
+    "llms.txt",
+    "rustfmt.toml",
+]
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
