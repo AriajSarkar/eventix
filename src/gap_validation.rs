@@ -477,7 +477,7 @@ pub fn suggest_alternatives(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unwrap_used, clippy::len_zero)]
     use super::*;
     use crate::timezone::parse_datetime_with_tz;
     use crate::Calendar;
@@ -623,7 +623,7 @@ mod tests {
         // Find slots for 1-hour meeting
         let slots = find_available_slots(&cal, start, end, Duration::hours(1)).unwrap();
 
-        assert!(!slots.is_empty());
+        assert!(slots.len() > 0);
         for slot in slots {
             assert!(slot.duration >= Duration::hours(1));
         }
@@ -640,7 +640,7 @@ mod tests {
         let alternatives =
             suggest_alternatives(&cal, requested, Duration::hours(1), Duration::hours(4)).unwrap();
 
-        assert!(!alternatives.is_empty());
+        assert!(alternatives.len() > 0);
     }
 
     #[test]
