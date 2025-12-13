@@ -98,6 +98,7 @@ pub fn is_dst(dt: &DateTime<Tz>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
     use chrono::Timelike;
 

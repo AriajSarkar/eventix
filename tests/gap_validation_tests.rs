@@ -2,7 +2,7 @@
 //!
 //! These tests validate the unique gap detection and schedule analysis
 //! features that set eventix apart from other calendar crates.
-
+#![allow(clippy::unwrap_used, clippy::len_zero)]
 use eventix::{gap_validation, timezone, Calendar, Duration, Event, Recurrence};
 
 #[test]

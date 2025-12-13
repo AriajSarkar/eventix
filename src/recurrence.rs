@@ -330,6 +330,7 @@ impl Default for RecurrenceFilter {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
     use crate::timezone::parse_timezone;
 

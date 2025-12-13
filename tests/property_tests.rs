@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use chrono::{Duration, TimeZone};
 use eventix::timezone;
 use eventix::{Calendar, Event, Recurrence};

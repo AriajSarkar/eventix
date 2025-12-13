@@ -7,7 +7,6 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 [![CI](https://github.com/AriajSarkar/eventix/workflows/Rust%20CI/badge.svg)](https://github.com/AriajSarkar/eventix/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
-
 ## Features
 
 - 🌍 **Timezone-aware events** - Full support for timezones and DST handling using `chrono-tz`
@@ -42,7 +41,7 @@ eventix = "0.3.0"
 ### Basic Usage
 
 ```rust
-use eventix::{Calendar, Event, Recurrence};
+use eventix::{Calendar, Duration, Event, Recurrence};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a calendar
@@ -64,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let standup = Event::builder()
         .title("Daily Standup")
         .start("2025-11-01 09:00:00", "America/New_York")
-        .duration_minutes(15)
+        .duration(Duration::minutes(15))
         .recurrence(Recurrence::daily().count(30))
         .skip_weekends(true)
         .build()?;
@@ -228,7 +227,7 @@ let end = timezone::parse_datetime_with_tz("2025-11-03 18:00:00", tz)?;
 // Find gaps between events (at least 30 minutes)
 let gaps = gap_validation::find_gaps(&cal, start, end, Duration::minutes(30))?;
 for gap in gaps {
-    println!("Free: {} to {} ({} min)", 
+    println!("Free: {} to {} ({} min)",
         gap.start.format("%H:%M"),
         gap.end.format("%H:%M"),
         gap.duration_minutes()
@@ -244,7 +243,7 @@ if !overlaps.is_empty() {
 // Analyze schedule density
 let density = gap_validation::calculate_density(&cal, start, end)?;
 println!("Schedule occupancy: {:.1}%", density.occupancy_percentage);
-println!("Busy: {:.1}h, Free: {:.1}h", 
+println!("Busy: {:.1}h, Free: {:.1}h",
     density.busy_duration.num_minutes() as f64 / 60.0,
     density.free_duration.num_minutes() as f64 / 60.0
 );
@@ -259,8 +258,8 @@ let available = gap_validation::is_slot_available(&cal, check_time, check_time +
 
 // Get alternative times for conflicts
 let alternatives = gap_validation::suggest_alternatives(
-    &cal, 
-    check_time, 
+    &cal,
+    check_time,
     Duration::hours(1),
     Duration::hours(2)  // search within 2 hours
 )?;
@@ -348,5 +347,5 @@ at your option.
 
 Built with these excellent crates:
 - `chrono` and `chrono-tz` for date/time handling
-- `rrule` for recurrence rule support  
+- `rrule` for recurrence rule support
 - `icalendar` for ICS format compatibility

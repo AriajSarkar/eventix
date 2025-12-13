@@ -1,5 +1,7 @@
 //! Integration tests for timezone-aware ICS export/import
 
+#![allow(clippy::unwrap_used)]
+
 use eventix::{timezone, Calendar, Event, Recurrence};
 
 #[test]
@@ -60,7 +62,7 @@ fn test_multiple_timezones_in_one_calendar() {
 
     for (i, tz) in timezones.iter().enumerate() {
         let event = Event::builder()
-            .title(&format!("Event {}", i + 1))
+            .title(format!("Event {}", i + 1))
             .start("2025-10-27 10:00:00", tz)
             .duration_hours(1)
             .build()
