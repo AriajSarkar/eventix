@@ -309,6 +309,14 @@ impl EventBuilder {
         self
     }
 
+    /// Set the duration (calculates end_time from start_time)
+    pub fn duration(mut self, duration: Duration) -> Self {
+        if let Some(start) = self.start_time {
+            self.end_time = Some(start + duration);
+        }
+        self
+    }
+
     /// Add an attendee
     pub fn attendee(mut self, attendee: impl Into<String>) -> Self {
         self.attendees.push(attendee.into());
@@ -413,6 +421,7 @@ impl Default for EventBuilder {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     #[test]
@@ -430,6 +439,24 @@ mod tests {
         assert_eq!(event.description, Some("A test event".to_string()));
         assert_eq!(event.attendees.len(), 1);
         assert_eq!(event.duration(), Duration::hours(2));
+    }
+
+    #[test]
+    fn test_event_builder_duration() {
+        let event = Event::builder()
+            .title("Test Event")
+            .description("A test event")
+            .start("2025-11-01 10:00:00", "UTC")
+            .duration(Duration::hours(1) + Duration::minutes(10))
+            .attendee("alice@example.com")
+            .build()
+            .unwrap();
+
+        assert_eq!(event.title, "Test Event");
+        assert_eq!(event.description, Some("A test event".to_string()));
+        assert_eq!(event.attendees.len(), 1);
+        assert_eq!(event.end_time.to_rfc3339(), "2025-11-01T11:10:00+00:00");
+        assert_eq!(event.duration().as_seconds_f32(), (60.0 * 60.0) + (10.0 * 60.0));
     }
 
     #[test]
