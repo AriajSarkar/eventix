@@ -456,7 +456,8 @@ mod tests {
         assert_eq!(event.description, Some("A test event".to_string()));
         assert_eq!(event.attendees.len(), 1);
         assert_eq!(event.end_time.to_rfc3339(), "2025-11-01T11:10:00+00:00");
-        assert_eq!(event.duration().as_seconds_f32(), (60.0 * 60.0) + (10.0 * 60.0));
+        let duration_in_secs = (60.0 * 60.0) + (10.0 * 60.0); // 1 hour 10 minutes = 4200 seconds
+        assert_eq!(event.duration().as_seconds_f32(), duration_in_secs);
     }
 
     #[test]

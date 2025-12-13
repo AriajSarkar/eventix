@@ -315,6 +315,7 @@ fn parse_ical_datetime_value(dt_str: &str, tz: Tz) -> Result<DateTime<Tz>> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     #[test]
