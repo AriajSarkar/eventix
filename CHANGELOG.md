@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2025-12-18
+
+### Added
+- **EventBuilder.duration()**: New flexible `.duration()` method that accepts any `Duration` object for complex durations (e.g., `Duration::hours(1) + Duration::minutes(10)`)
+- Complementary to existing `duration_hours()` and `duration_minutes()` convenience methods
+- Comprehensive test coverage for duration functionality
+
+### Changed
+- Updated README examples to demonstrate `Duration` usage
+- Added clippy lint allowances to test modules for cleaner test code
+
 ## [0.3.0] - 2025-12-06
 
 ### Added
