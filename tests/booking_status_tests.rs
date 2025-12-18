@@ -1,4 +1,5 @@
 //! Integration tests for Booking State Machine
+#![allow(clippy::unwrap_used)]
 
 use eventix::{gap_validation, timezone, Calendar, Duration, Event, EventStatus};
 
