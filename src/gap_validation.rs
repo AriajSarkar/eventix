@@ -477,6 +477,7 @@ pub fn suggest_alternatives(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::len_zero)]
     use super::*;
     use crate::timezone::parse_datetime_with_tz;
     use crate::Calendar;
