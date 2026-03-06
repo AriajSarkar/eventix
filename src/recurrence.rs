@@ -260,8 +260,20 @@ impl Recurrence {
 /// Advance a datetime by the given frequency and interval.
 ///
 /// Shared helper used by both the eager `generate_occurrences()` path and
-/// the lazy `OccurrenceIterator`. Returns `None` when the resulting date
-/// is invalid (e.g. Feb 30) or the frequency is unsupported.
+/// the lazy `OccurrenceIterator`.
+///
+/// # Supported frequencies
+///
+/// - [`Frequency::Daily`] — adds `interval` days
+/// - [`Frequency::Weekly`] — adds `interval` weeks
+/// - [`Frequency::Monthly`] — adds `interval` months, clamping to the last
+///   valid day if the target month is shorter (e.g. Jan 31 → Feb 28)
+/// - [`Frequency::Yearly`] — adds `interval` years, clamping for leap-day
+///   dates (e.g. Feb 29 → Feb 28 in non-leap years)
+///
+/// Other variants (`Secondly`, `Minutely`, `Hourly`) are **not supported**
+/// and will return `None`, causing the iterator to terminate after the
+/// first occurrence.
 fn advance_by_frequency(
     current: DateTime<Tz>,
     frequency: Frequency,
@@ -278,33 +290,38 @@ fn advance_by_frequency(
                 new_month -= 12;
                 new_year += 1;
             }
-            let new_date = current
-                .date_naive()
-                .with_year(new_year)
-                .and_then(|d| d.with_month(new_month as u32));
-            match new_date {
-                Some(date) => {
-                    let time = current.time();
-                    let naive = chrono::NaiveDateTime::new(date, time);
-                    current.timezone().from_local_datetime(&naive).earliest()
-                }
-                None => None,
-            }
+            let date = clamp_day_to_month(new_year, new_month as u32, current.day())?;
+            let naive = chrono::NaiveDateTime::new(date, current.time());
+            current.timezone().from_local_datetime(&naive).earliest()
         }
         Frequency::Yearly => {
             let new_year = current.year() + interval as i32;
-            let new_date = current.date_naive().with_year(new_year);
-            match new_date {
-                Some(date) => {
-                    let time = current.time();
-                    let naive = chrono::NaiveDateTime::new(date, time);
-                    current.timezone().from_local_datetime(&naive).earliest()
-                }
-                None => None,
-            }
+            let date = clamp_day_to_month(new_year, current.month(), current.day())?;
+            let naive = chrono::NaiveDateTime::new(date, current.time());
+            current.timezone().from_local_datetime(&naive).earliest()
         }
         _ => None,
     }
+}
+
+/// Build a `NaiveDate` for `(year, month, day)`, clamping `day` downward
+/// to the last valid day of the month when the original day doesn't exist
+/// (e.g. day 31 in a 30-day month, or day 29 in non-leap February).
+fn clamp_day_to_month(year: i32, month: u32, day: u32) -> Option<chrono::NaiveDate> {
+    // Try the original day first (fast path)
+    if let Some(d) = chrono::NaiveDate::from_ymd_opt(year, month, day) {
+        return Some(d);
+    }
+    // Clamp: walk backward from day-1 to 28 (always valid)
+    let mut d = day.min(31);
+    while d > 28 {
+        d -= 1;
+        if let Some(date) = chrono::NaiveDate::from_ymd_opt(year, month, d) {
+            return Some(date);
+        }
+    }
+    // 28 is always valid for months 1-12
+    chrono::NaiveDate::from_ymd_opt(year, month, 28)
 }
 
 /// A lazy iterator over recurrence occurrences.
@@ -648,5 +665,37 @@ mod tests {
             let diff = occurrences[i] - occurrences[i - 1];
             assert_eq!(diff, chrono::Duration::weeks(2));
         }
+    }
+
+    #[test]
+    fn test_monthly_day_clamping() {
+        // Jan 31 → Feb 28, Mar 28, Apr 28 ... (clamps to last valid day)
+        let recurrence = Recurrence::monthly().count(4);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-31 12:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 4);
+        assert_eq!(occurrences[0].day(), 31); // Jan 31
+        assert_eq!(occurrences[1].day(), 28); // Feb 28 (2025 is not a leap year)
+        assert_eq!(occurrences[1].month(), 2);
+        // Subsequent months clamp from 28 (the new current day)
+        assert_eq!(occurrences[2].month(), 3);
+        assert_eq!(occurrences[3].month(), 4);
+    }
+
+    #[test]
+    fn test_yearly_leap_day_clamping() {
+        // Feb 29 in a leap year → Feb 28 in non-leap years
+        let recurrence = Recurrence::yearly().count(3);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2024-02-29 08:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 3);
+        assert_eq!(occurrences[0].day(), 29); // 2024 leap year
+        assert_eq!(occurrences[1].day(), 28); // 2025 not a leap year
+        assert_eq!(occurrences[1].year(), 2025);
+        assert_eq!(occurrences[2].day(), 28); // 2026 not a leap year
     }
 }
