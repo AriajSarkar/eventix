@@ -1,7 +1,7 @@
 //! Recurrence rules and patterns for repeating events
 
 use crate::error::Result;
-use chrono::{DateTime, Datelike, TimeZone};
+use chrono::{DateTime, Datelike, Offset, TimeZone};
 use chrono_tz::Tz;
 use rrule::Frequency;
 
@@ -200,67 +200,7 @@ impl Recurrence {
         start: DateTime<Tz>,
         max_occurrences: usize,
     ) -> Result<Vec<DateTime<Tz>>> {
-        // Simplified recurrence generation without using rrule library for now
-        // This is a basic implementation that handles common cases
-
-        let mut occurrences = Vec::new();
-        let mut current = start;
-
-        let count_limit = self.count.unwrap_or(max_occurrences as u32).min(max_occurrences as u32);
-
-        loop {
-            if occurrences.len() >= count_limit as usize {
-                break;
-            }
-
-            // Check until date if specified
-            if let Some(until) = self.until {
-                if current > until {
-                    break;
-                }
-            }
-
-            // Weekly + weekdays: use intra-week expansion (advance_weekly_weekday
-            // handles visiting all matching weekdays within each week period)
-            if self.frequency == Frequency::Weekly {
-                if let Some(ref weekdays) = self.by_weekday {
-                    if weekdays.contains(&current.weekday()) {
-                        occurrences.push(current);
-                    }
-                    match advance_weekly_weekday(current, self.interval, weekdays) {
-                        Some(next) => {
-                            current = next;
-                            continue;
-                        }
-                        None => break,
-                    }
-                }
-            }
-
-            // Skip if weekday filter is set and this day doesn't match
-            // (applies to Daily and other frequencies, not Weekly which is handled above)
-            if let Some(ref weekdays) = self.by_weekday {
-                if !weekdays.contains(&current.weekday()) {
-                    match advance_by_frequency(current, self.frequency, self.interval) {
-                        Some(next) => {
-                            current = next;
-                            continue;
-                        }
-                        None => break,
-                    }
-                }
-            }
-
-            occurrences.push(current);
-
-            // Advance to next occurrence using shared helper
-            match advance_by_frequency(current, self.frequency, self.interval) {
-                Some(next) => current = next,
-                None => break,
-            };
-        }
-
-        Ok(occurrences)
+        Ok(self.occurrences(start).take(max_occurrences).collect())
     }
 
     /// Create a lazy iterator over occurrences of this recurrence pattern.
@@ -298,16 +238,35 @@ impl Recurrence {
 /// the lazy `OccurrenceIterator`.
 ///
 /// Resolve a `NaiveDateTime` to a timezone-aware `DateTime<Tz>`, handling
-/// DST spring-forward gaps. Tries `.earliest()` first; if the local time
-/// is nonexistent (falls in a gap), falls back to `.latest()` which gives
-/// the first valid instant after the gap.
+/// DST transitions:
+///
+/// - **Normal / fall-back (ambiguous)**: picks the earlier of two candidates
+/// - **Spring-forward (gap)**: the local time doesn't exist; applies the
+///   pre-gap UTC offset so the resulting wall-clock time shifts forward by
+///   exactly the gap size (e.g. 2:30 AM EST → 3:30 AM EDT), matching
+///   Google Calendar / RFC 5545 behaviour
 fn resolve_local(tz: Tz, naive: chrono::NaiveDateTime) -> Option<DateTime<Tz>> {
-    tz.from_local_datetime(&naive)
-        .earliest()
-        .or_else(|| tz.from_local_datetime(&naive).latest())
+    if let Some(dt) = tz.from_local_datetime(&naive).earliest() {
+        return Some(dt);
+    }
+    // DST gap: the local time doesn't exist.  Determine the UTC offset
+    // that was in effect just before the gap by resolving a time one day
+    // earlier (guaranteed to exist outside the gap).  Converting the
+    // nonexistent local time with that offset naturally lands on the
+    // correct post-transition wall-clock time.
+    let day_before = naive - chrono::Duration::days(1);
+    let pre_gap_dt = tz.from_local_datetime(&day_before).earliest()?;
+    let pre_offset = pre_gap_dt.offset().fix();
+    let utc_naive = naive - pre_offset;
+    Some(chrono::Utc.from_utc_datetime(&utc_naive).with_timezone(&tz))
 }
 
 /// Advance a `DateTime<Tz>` by one recurrence step.
+///
+/// `intended_time` is the original start's wall-clock time, used instead of
+/// `current.time()` to prevent time-drift after DST gap resolution.
+/// (e.g. a 2:30 AM event shifted to 3:30 AM on DST day returns to
+/// 2:30 AM the next day.)
 ///
 /// Supported frequencies:
 ///
@@ -326,6 +285,7 @@ fn advance_by_frequency(
     current: DateTime<Tz>,
     frequency: Frequency,
     interval: u16,
+    intended_time: chrono::NaiveTime,
 ) -> Option<DateTime<Tz>> {
     if interval == 0 {
         return None;
@@ -334,12 +294,12 @@ fn advance_by_frequency(
     match frequency {
         Frequency::Daily => {
             let new_date = current.date_naive() + chrono::Days::new(interval as u64);
-            let naive = chrono::NaiveDateTime::new(new_date, current.time());
+            let naive = chrono::NaiveDateTime::new(new_date, intended_time);
             resolve_local(tz, naive)
         }
         Frequency::Weekly => {
             let new_date = current.date_naive() + chrono::Days::new(interval as u64 * 7);
-            let naive = chrono::NaiveDateTime::new(new_date, current.time());
+            let naive = chrono::NaiveDateTime::new(new_date, intended_time);
             resolve_local(tz, naive)
         }
         Frequency::Monthly => {
@@ -351,13 +311,13 @@ fn advance_by_frequency(
                 new_year += 1;
             }
             let date = clamp_day_to_month(new_year, new_month as u32, current.day())?;
-            let naive = chrono::NaiveDateTime::new(date, current.time());
+            let naive = chrono::NaiveDateTime::new(date, intended_time);
             resolve_local(tz, naive)
         }
         Frequency::Yearly => {
             let new_year = current.year() + interval as i32;
             let date = clamp_day_to_month(new_year, current.month(), current.day())?;
-            let naive = chrono::NaiveDateTime::new(date, current.time());
+            let naive = chrono::NaiveDateTime::new(date, intended_time);
             resolve_local(tz, naive)
         }
         _ => None,
@@ -387,47 +347,37 @@ fn clamp_day_to_month(year: i32, month: u32, day: u32) -> Option<chrono::NaiveDa
 /// For Weekly frequency with specific weekdays: advance to the next matching
 /// weekday. Within the current week period, steps forward day-by-day.
 /// When no more matching weekdays remain in this week, jumps by
-/// `(interval - 1) * 7` extra days to reach the next week period and
-/// finds the first matching weekday there.
+/// `interval` weeks to reach the next week period and finds the first
+/// matching weekday there.
 fn advance_weekly_weekday(
     current: DateTime<Tz>,
     interval: u16,
     weekdays: &[chrono::Weekday],
+    intended_time: chrono::NaiveTime,
 ) -> Option<DateTime<Tz>> {
     let tz = current.timezone();
-    let time = current.time();
-    let mut date = current.date_naive();
-    let start_weekday = date.weekday();
+    let date = current.date_naive();
+    let current_dow = date.weekday().num_days_from_monday(); // 0=Mon..6=Sun
 
-    // Try remaining days in the current week (up to 6 days ahead)
-    for offset in 1u64..7 {
-        let candidate = date + chrono::Days::new(offset);
-        let wd = candidate.weekday();
-        // We've wrapped past the starting weekday back to start of next period
-        if wd == start_weekday {
-            break;
-        }
-        if weekdays.contains(&wd) {
-            let naive = chrono::NaiveDateTime::new(candidate, time);
+    // Try remaining days in the current calendar week (Mon-Sun).
+    // Only consider days strictly after the current weekday within this week.
+    for day_offset in 1u64..(7 - current_dow as u64) {
+        let candidate = date + chrono::Days::new(day_offset);
+        if weekdays.contains(&candidate.weekday()) {
+            let naive = chrono::NaiveDateTime::new(candidate, intended_time);
             return resolve_local(tz, naive);
         }
     }
 
     // No more matching weekdays this week — jump to the next week period.
-    // Skip forward by interval weeks (relative to the current week's end),
-    // then find the first matching weekday.
-    // Days until the same weekday next occurrence = interval * 7
-    date = date + chrono::Days::new(interval as u64 * 7);
+    // Find the Monday of the current week, then advance by interval weeks.
+    let week_start = date - chrono::Days::new(current_dow as u64);
+    let next_week_start = week_start + chrono::Days::new(interval as u64 * 7);
 
-    // From this anchor, walk backward to the start of its week (Monday)
-    // then scan forward for the first matching weekday.
-    let anchor_wd = date.weekday().num_days_from_monday();
-    let week_start = date - chrono::Days::new(anchor_wd as u64);
-
-    for offset in 0u64..7 {
-        let candidate = week_start + chrono::Days::new(offset);
+    for day_offset in 0u64..7 {
+        let candidate = next_week_start + chrono::Days::new(day_offset);
         if weekdays.contains(&candidate.weekday()) {
-            let naive = chrono::NaiveDateTime::new(candidate, time);
+            let naive = chrono::NaiveDateTime::new(candidate, intended_time);
             return resolve_local(tz, naive);
         }
     }
@@ -461,6 +411,7 @@ fn advance_weekly_weekday(
 pub struct OccurrenceIterator {
     recurrence: Recurrence,
     current: DateTime<Tz>,
+    intended_time: chrono::NaiveTime,
     count: u32,
     exhausted: bool,
 }
@@ -470,6 +421,7 @@ impl OccurrenceIterator {
     fn new(recurrence: Recurrence, start: DateTime<Tz>) -> Self {
         Self {
             recurrence,
+            intended_time: start.time(),
             current: start,
             count: 0,
             exhausted: false,
@@ -501,7 +453,12 @@ impl OccurrenceIterator {
 
     /// Compute the next occurrence date
     fn compute_next(&self) -> Option<DateTime<Tz>> {
-        advance_by_frequency(self.current, self.recurrence.frequency, self.recurrence.interval)
+        advance_by_frequency(
+            self.current,
+            self.recurrence.frequency,
+            self.recurrence.interval,
+            self.intended_time,
+        )
     }
 }
 
@@ -520,7 +477,12 @@ impl Iterator for OccurrenceIterator {
             // Weekly + weekdays: use intra-week expansion
             if self.recurrence.frequency == Frequency::Weekly {
                 if let Some(ref weekdays) = self.recurrence.by_weekday {
-                    match advance_weekly_weekday(result, self.recurrence.interval, weekdays) {
+                    match advance_weekly_weekday(
+                        result,
+                        self.recurrence.interval,
+                        weekdays,
+                        self.intended_time,
+                    ) {
                         Some(next) => self.current = next,
                         None => self.exhausted = true,
                     }
@@ -628,6 +590,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use crate::timezone::parse_timezone;
+    use chrono::Timelike;
 
     #[test]
     fn test_daily_recurrence() {
@@ -888,6 +851,177 @@ mod tests {
         let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
 
         let eager = recurrence.generate_occurrences(start, 14).unwrap();
+        let lazy: Vec<_> = recurrence.occurrences(start).collect();
+
+        assert_eq!(eager.len(), lazy.len());
+        for (e, l) in eager.iter().zip(lazy.iter()) {
+            assert_eq!(e, l);
+        }
+    }
+
+    #[test]
+    fn test_weekly_weekdays_expansion_lazy() {
+        use rrule::Weekday;
+        // Weekly recurrence on Mon/Wed should emit BOTH Mon and Wed each week
+        let recurrence = Recurrence::weekly().weekdays(vec![Weekday::Mon, Weekday::Wed]).count(6);
+
+        let tz = parse_timezone("UTC").unwrap();
+        // 2025-01-06 is a Monday
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 6);
+
+        // Should be Mon6, Wed8, Mon13, Wed15, Mon20, Wed22
+        assert_eq!(occurrences[0].day(), 6); // Mon
+        assert_eq!(occurrences[1].day(), 8); // Wed
+        assert_eq!(occurrences[2].day(), 13); // Mon
+        assert_eq!(occurrences[3].day(), 15); // Wed
+        assert_eq!(occurrences[4].day(), 20); // Mon
+        assert_eq!(occurrences[5].day(), 22); // Wed
+
+        for occ in &occurrences {
+            let wd = occ.weekday();
+            assert!(wd == Weekday::Mon || wd == Weekday::Wed);
+        }
+    }
+
+    #[test]
+    fn test_weekly_weekdays_expansion_eager() {
+        use rrule::Weekday;
+        // Eager path should match lazy for weekly + weekdays
+        let recurrence = Recurrence::weekly().weekdays(vec![Weekday::Mon, Weekday::Wed]).count(6);
+
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
+
+        let eager = recurrence.generate_occurrences(start, 6).unwrap();
+        let lazy: Vec<_> = recurrence.occurrences(start).collect();
+
+        assert_eq!(eager.len(), lazy.len());
+        for (e, l) in eager.iter().zip(lazy.iter()) {
+            assert_eq!(e, l);
+        }
+    }
+
+    #[test]
+    fn test_weekly_weekdays_biweekly() {
+        use rrule::Weekday;
+        // Every 2 weeks, on Tue/Thu
+        let recurrence = Recurrence::weekly()
+            .interval(2)
+            .weekdays(vec![Weekday::Tue, Weekday::Thu])
+            .count(4);
+
+        let tz = parse_timezone("UTC").unwrap();
+        // 2025-01-07 is a Tuesday
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-07 10:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 4);
+
+        // Week 1: Tue Jan 7, Thu Jan 9
+        assert_eq!(occurrences[0].day(), 7);
+        assert_eq!(occurrences[1].day(), 9);
+        // Week 3 (skip week 2): Tue Jan 21, Thu Jan 23
+        assert_eq!(occurrences[2].day(), 21);
+        assert_eq!(occurrences[3].day(), 23);
+    }
+
+    #[test]
+    fn test_weekly_weekdays_start_not_in_weekdays() {
+        use rrule::Weekday;
+        // Start on a Tuesday but only want Mon/Fri
+        let recurrence = Recurrence::weekly().weekdays(vec![Weekday::Mon, Weekday::Fri]).count(4);
+
+        let tz = parse_timezone("UTC").unwrap();
+        // 2025-01-07 is a Tuesday
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-07 09:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 4);
+
+        // Tue is skipped, first match is Fri Jan 10, then Mon Jan 13, Fri Jan 17, Mon Jan 20
+        for occ in &occurrences {
+            let wd = occ.weekday();
+            assert!(wd == Weekday::Mon || wd == Weekday::Fri);
+        }
+    }
+
+    #[test]
+    fn test_dst_spring_forward_daily() {
+        // US spring-forward: 2025-03-09 2:00 AM → 3:00 AM in America/New_York
+        // A daily recurrence at 2:30 AM should survive the DST gap
+        let recurrence = Recurrence::daily().count(3);
+        let tz = parse_timezone("America/New_York").unwrap();
+        // March 8 at 2:30 AM exists
+        let start = crate::timezone::parse_datetime_with_tz("2025-03-08 02:30:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        // Should not terminate — all 3 occurrences emitted
+        assert_eq!(occurrences.len(), 3);
+        // March 8, 9, 10
+        assert_eq!(occurrences[0].day(), 8);
+        assert_eq!(occurrences[1].day(), 9); // DST gap day — resolved to post-gap time
+        assert_eq!(occurrences[2].day(), 10);
+        // March 9: 2:30 AM EST doesn't exist, should resolve to 3:30 AM EDT
+        // (pre-gap offset UTC-5 applied to 02:30 → 07:30 UTC → 03:30 EDT)
+        assert_eq!(occurrences[1].hour(), 3);
+        assert_eq!(occurrences[1].minute(), 30);
+        // March 10: back to normal 2:30 AM EDT
+        assert_eq!(occurrences[2].hour(), 2);
+        assert_eq!(occurrences[2].minute(), 30);
+    }
+
+    #[test]
+    fn test_dst_spring_forward_weekly() {
+        // Weekly recurrence crossing DST spring-forward
+        let recurrence = Recurrence::weekly().count(3);
+        let tz = parse_timezone("America/New_York").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-03-02 02:30:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 3);
+        // Mar 2, Mar 9 (DST day), Mar 16
+        assert_eq!(occurrences[0].day(), 2);
+        assert_eq!(occurrences[1].day(), 9);
+        assert_eq!(occurrences[2].day(), 16);
+        // Mar 9 should resolve to 3:30 AM EDT (same pre-gap offset logic)
+        assert_eq!(occurrences[1].hour(), 3);
+        assert_eq!(occurrences[1].minute(), 30);
+        // Mar 16 is post-DST, should be 2:30 AM EDT
+        assert_eq!(occurrences[2].hour(), 2);
+    }
+
+    #[test]
+    fn test_dst_fall_back_daily() {
+        // US fall-back: 2025-11-02 2:00 AM → 1:00 AM in America/New_York
+        // 1:30 AM is ambiguous (exists in both EDT and EST)
+        // resolve_local picks .earliest() which is the EDT version
+        let recurrence = Recurrence::daily().count(3);
+        let tz = parse_timezone("America/New_York").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-11-01 01:30:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 3);
+        assert_eq!(occurrences[0].day(), 1);
+        assert_eq!(occurrences[1].day(), 2); // ambiguous day
+        assert_eq!(occurrences[2].day(), 3);
+        // All should be at 1:30 AM wall-clock
+        for occ in &occurrences {
+            assert_eq!(occ.hour(), 1);
+            assert_eq!(occ.minute(), 30);
+        }
+    }
+
+    #[test]
+    fn test_dst_spring_forward_eager_matches_lazy() {
+        // Verify eager and lazy paths produce identical results across DST
+        let recurrence = Recurrence::daily().count(5);
+        let tz = parse_timezone("America/New_York").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-03-07 02:30:00", tz).unwrap();
+
+        let eager = recurrence.generate_occurrences(start, 5).unwrap();
         let lazy: Vec<_> = recurrence.occurrences(start).collect();
 
         assert_eq!(eager.len(), lazy.len());

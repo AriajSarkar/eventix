@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster overlap detection**: `find_overlaps()` uses an O(N log N) sweep-line algorithm instead of O(N²).
 - **Correct boundary handling**: Back-to-back events that merely touch at a boundary are no longer reported as overlapping.
 - **DST-safe recurrence**: Daily/Weekly recurrence uses local date arithmetic to preserve wall-clock time across DST transitions.
-- **DST spring-forward resilience**: Recurrence generation falls back to the post-gap time instead of terminating when a computed occurrence lands in a nonexistent DST gap.
+- **DST spring-forward resilience**: Recurrence generation uses pre-gap UTC offset conversion to land on the correct post-transition wall-clock time (e.g. 2:30 AM EST → 3:30 AM EDT), matching Google Calendar / RFC 5545 behaviour. Subsequent occurrences return to the originally intended time rather than drifting.
 - **Deterministic overlap ordering**: `find_overlaps()` uses `BTreeSet` for consistent results.
 - **Zero-duration events**: No longer interfere with overlap detection.
 
