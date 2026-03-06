@@ -218,57 +218,10 @@ impl Recurrence {
 
             occurrences.push(current);
 
-            // Calculate next occurrence based on frequency
-            current = match self.frequency {
-                Frequency::Daily => current + chrono::Duration::days(self.interval as i64),
-                Frequency::Weekly => current + chrono::Duration::weeks(self.interval as i64),
-                Frequency::Monthly => {
-                    // Add months
-                    let months_to_add = self.interval as i32;
-                    let mut new_month = current.month() as i32 + months_to_add;
-                    let mut new_year = current.year();
-
-                    while new_month > 12 {
-                        new_month -= 12;
-                        new_year += 1;
-                    }
-
-                    let new_date = current
-                        .date_naive()
-                        .with_year(new_year)
-                        .and_then(|d| d.with_month(new_month as u32));
-
-                    match new_date {
-                        Some(date) => {
-                            let time = current.time();
-                            let naive = chrono::NaiveDateTime::new(date, time);
-                            current
-                                .timezone()
-                                .from_local_datetime(&naive)
-                                .earliest()
-                                .unwrap_or(current)
-                        }
-                        None => break,
-                    }
-                }
-                Frequency::Yearly => {
-                    let new_year = current.year() + self.interval as i32;
-                    let new_date = current.date_naive().with_year(new_year);
-
-                    match new_date {
-                        Some(date) => {
-                            let time = current.time();
-                            let naive = chrono::NaiveDateTime::new(date, time);
-                            current
-                                .timezone()
-                                .from_local_datetime(&naive)
-                                .earliest()
-                                .unwrap_or(current)
-                        }
-                        None => break,
-                    }
-                }
-                _ => break, // Unsupported frequency
+            // Advance to next occurrence using shared helper
+            match advance_by_frequency(current, self.frequency, self.interval) {
+                Some(next) => current = next,
+                None => break,
             };
         }
 
@@ -301,6 +254,56 @@ impl Recurrence {
     /// ```
     pub fn occurrences(&self, start: DateTime<Tz>) -> OccurrenceIterator {
         OccurrenceIterator::new(self.clone(), start)
+    }
+}
+
+/// Advance a datetime by the given frequency and interval.
+///
+/// Shared helper used by both the eager `generate_occurrences()` path and
+/// the lazy `OccurrenceIterator`. Returns `None` when the resulting date
+/// is invalid (e.g. Feb 30) or the frequency is unsupported.
+fn advance_by_frequency(
+    current: DateTime<Tz>,
+    frequency: Frequency,
+    interval: u16,
+) -> Option<DateTime<Tz>> {
+    match frequency {
+        Frequency::Daily => Some(current + chrono::Duration::days(interval as i64)),
+        Frequency::Weekly => Some(current + chrono::Duration::weeks(interval as i64)),
+        Frequency::Monthly => {
+            let months_to_add = interval as i32;
+            let mut new_month = current.month() as i32 + months_to_add;
+            let mut new_year = current.year();
+            while new_month > 12 {
+                new_month -= 12;
+                new_year += 1;
+            }
+            let new_date = current
+                .date_naive()
+                .with_year(new_year)
+                .and_then(|d| d.with_month(new_month as u32));
+            match new_date {
+                Some(date) => {
+                    let time = current.time();
+                    let naive = chrono::NaiveDateTime::new(date, time);
+                    current.timezone().from_local_datetime(&naive).earliest()
+                }
+                None => None,
+            }
+        }
+        Frequency::Yearly => {
+            let new_year = current.year() + interval as i32;
+            let new_date = current.date_naive().with_year(new_year);
+            match new_date {
+                Some(date) => {
+                    let time = current.time();
+                    let naive = chrono::NaiveDateTime::new(date, time);
+                    current.timezone().from_local_datetime(&naive).earliest()
+                }
+                None => None,
+            }
+        }
+        _ => None,
     }
 }
 
@@ -370,53 +373,7 @@ impl OccurrenceIterator {
 
     /// Compute the next occurrence date
     fn compute_next(&self) -> Option<DateTime<Tz>> {
-        match self.recurrence.frequency {
-            Frequency::Daily => {
-                Some(self.current + chrono::Duration::days(self.recurrence.interval as i64))
-            }
-            Frequency::Weekly => {
-                Some(self.current + chrono::Duration::weeks(self.recurrence.interval as i64))
-            }
-            Frequency::Monthly => {
-                let months_to_add = self.recurrence.interval as i32;
-                let mut new_month = self.current.month() as i32 + months_to_add;
-                let mut new_year = self.current.year();
-
-                while new_month > 12 {
-                    new_month -= 12;
-                    new_year += 1;
-                }
-
-                let new_date = self
-                    .current
-                    .date_naive()
-                    .with_year(new_year)
-                    .and_then(|d| d.with_month(new_month as u32));
-
-                match new_date {
-                    Some(date) => {
-                        let time = self.current.time();
-                        let naive = chrono::NaiveDateTime::new(date, time);
-                        self.current.timezone().from_local_datetime(&naive).earliest()
-                    }
-                    None => None,
-                }
-            }
-            Frequency::Yearly => {
-                let new_year = self.current.year() + self.recurrence.interval as i32;
-                let new_date = self.current.date_naive().with_year(new_year);
-
-                match new_date {
-                    Some(date) => {
-                        let time = self.current.time();
-                        let naive = chrono::NaiveDateTime::new(date, time);
-                        self.current.timezone().from_local_datetime(&naive).earliest()
-                    }
-                    None => None,
-                }
-            }
-            _ => None, // Unsupported frequency
-        }
+        advance_by_frequency(self.current, self.recurrence.frequency, self.recurrence.interval)
     }
 }
 
