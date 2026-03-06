@@ -214,7 +214,11 @@ impl Recurrence {
         // signature is a breaking API change that belongs in a separate PR.
         let count_limit = self.count.unwrap_or(max_occurrences as u32).min(max_occurrences as u32);
 
-        for _ in 0..count_limit {
+        loop {
+            if occurrences.len() >= count_limit as usize {
+                break;
+            }
+
             // Check until date if specified
             if let Some(until) = self.until {
                 if current > until {
@@ -303,8 +307,16 @@ fn advance_by_frequency(
         return None;
     }
     match frequency {
-        Frequency::Daily => Some(current + chrono::Duration::days(interval as i64)),
-        Frequency::Weekly => Some(current + chrono::Duration::weeks(interval as i64)),
+        Frequency::Daily => {
+            let new_date = current.date_naive() + chrono::Days::new(interval as u64);
+            let naive = chrono::NaiveDateTime::new(new_date, current.time());
+            current.timezone().from_local_datetime(&naive).earliest()
+        }
+        Frequency::Weekly => {
+            let new_date = current.date_naive() + chrono::Days::new(interval as u64 * 7);
+            let naive = chrono::NaiveDateTime::new(new_date, current.time());
+            current.timezone().from_local_datetime(&naive).earliest()
+        }
         Frequency::Monthly => {
             let months_to_add = interval as i32;
             let mut new_month = current.month() as i32 + months_to_add;
@@ -431,14 +443,8 @@ impl Iterator for OccurrenceIterator {
 
             // Compute next occurrence for future calls
             match self.compute_next() {
-                Some(next) => {
-                    self.current = next;
-                    self.count += 1;
-                }
-                None => {
-                    self.exhausted = true;
-                    self.count += 1;
-                }
+                Some(next) => self.current = next,
+                None => self.exhausted = true,
             }
 
             // Skip if weekday filter is set and this day doesn't match
@@ -447,6 +453,9 @@ impl Iterator for OccurrenceIterator {
                     continue;
                 }
             }
+
+            // Only count emitted (non-skipped) occurrences
+            self.count += 1;
 
             return Some(result);
         }
@@ -751,11 +760,12 @@ mod tests {
     #[test]
     fn test_weekdays_filter_lazy() {
         use rrule::Weekday;
-        // Weekly recurrence on Mon/Wed/Fri with daily interval
+        // Daily recurrence on Mon/Wed/Fri with count=14
+        // count(14) means 14 emitted (matching) occurrences, not 14 scanned slots
         // Start on a Monday (2025-01-06)
         let recurrence = Recurrence::daily()
             .weekdays(vec![Weekday::Mon, Weekday::Wed, Weekday::Fri])
-            .count(14); // 14 daily slots, should yield ~6 matching days
+            .count(14);
 
         let tz = parse_timezone("UTC").unwrap();
         let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
@@ -771,8 +781,8 @@ mod tests {
                 wd
             );
         }
-        // 14 daily slots from Mon Jan 6: Mon6,Wed8,Fri10,Mon13,Wed15,Fri17 = 6
-        assert_eq!(occurrences.len(), 6);
+        // count(14) emits exactly 14 matching weekdays
+        assert_eq!(occurrences.len(), 14);
     }
 
     #[test]
