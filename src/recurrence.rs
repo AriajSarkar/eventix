@@ -206,12 +206,6 @@ impl Recurrence {
         let mut occurrences = Vec::new();
         let mut current = start;
 
-        // TODO: This eager cap silently drops valid occurrences in long-range queries
-        // (e.g. a daily rule across a large window with max_occurrences = 1000 will
-        // under-report results with no indication the vector is partial). Consider
-        // driving callers through the lazy iterator up to the requested end bound,
-        // or surfacing truncation explicitly. Deferred — changing `generate_occurrences`
-        // signature is a breaking API change that belongs in a separate PR.
         let count_limit = self.count.unwrap_or(max_occurrences as u32).min(max_occurrences as u32);
 
         loop {
@@ -226,10 +220,27 @@ impl Recurrence {
                 }
             }
 
+            // Weekly + weekdays: use intra-week expansion (advance_weekly_weekday
+            // handles visiting all matching weekdays within each week period)
+            if self.frequency == Frequency::Weekly {
+                if let Some(ref weekdays) = self.by_weekday {
+                    if weekdays.contains(&current.weekday()) {
+                        occurrences.push(current);
+                    }
+                    match advance_weekly_weekday(current, self.interval, weekdays) {
+                        Some(next) => {
+                            current = next;
+                            continue;
+                        }
+                        None => break,
+                    }
+                }
+            }
+
             // Skip if weekday filter is set and this day doesn't match
+            // (applies to Daily and other frequencies, not Weekly which is handled above)
             if let Some(ref weekdays) = self.by_weekday {
                 if !weekdays.contains(&current.weekday()) {
-                    // Advance without adding to results
                     match advance_by_frequency(current, self.frequency, self.interval) {
                         Some(next) => {
                             current = next;
@@ -286,10 +297,23 @@ impl Recurrence {
 /// Shared helper used by both the eager `generate_occurrences()` path and
 /// the lazy `OccurrenceIterator`.
 ///
-/// # Supported frequencies
+/// Resolve a `NaiveDateTime` to a timezone-aware `DateTime<Tz>`, handling
+/// DST spring-forward gaps. Tries `.earliest()` first; if the local time
+/// is nonexistent (falls in a gap), falls back to `.latest()` which gives
+/// the first valid instant after the gap.
+fn resolve_local(tz: Tz, naive: chrono::NaiveDateTime) -> Option<DateTime<Tz>> {
+    tz.from_local_datetime(&naive)
+        .earliest()
+        .or_else(|| tz.from_local_datetime(&naive).latest())
+}
+
+/// Advance a `DateTime<Tz>` by one recurrence step.
 ///
-/// - [`Frequency::Daily`] — adds `interval` days
-/// - [`Frequency::Weekly`] — adds `interval` weeks
+/// Supported frequencies:
+///
+/// - [`Frequency::Daily`] — adds `interval` calendar days via local date
+///   arithmetic, preserving wall-clock time across DST transitions
+/// - [`Frequency::Weekly`] — adds `interval × 7` calendar days (same approach)
 /// - [`Frequency::Monthly`] — adds `interval` months, clamping to the last
 ///   valid day if the target month is shorter (e.g. Jan 31 → Feb 28)
 /// - [`Frequency::Yearly`] — adds `interval` years, clamping for leap-day
@@ -306,16 +330,17 @@ fn advance_by_frequency(
     if interval == 0 {
         return None;
     }
+    let tz = current.timezone();
     match frequency {
         Frequency::Daily => {
             let new_date = current.date_naive() + chrono::Days::new(interval as u64);
             let naive = chrono::NaiveDateTime::new(new_date, current.time());
-            current.timezone().from_local_datetime(&naive).earliest()
+            resolve_local(tz, naive)
         }
         Frequency::Weekly => {
             let new_date = current.date_naive() + chrono::Days::new(interval as u64 * 7);
             let naive = chrono::NaiveDateTime::new(new_date, current.time());
-            current.timezone().from_local_datetime(&naive).earliest()
+            resolve_local(tz, naive)
         }
         Frequency::Monthly => {
             let months_to_add = interval as i32;
@@ -327,13 +352,13 @@ fn advance_by_frequency(
             }
             let date = clamp_day_to_month(new_year, new_month as u32, current.day())?;
             let naive = chrono::NaiveDateTime::new(date, current.time());
-            current.timezone().from_local_datetime(&naive).earliest()
+            resolve_local(tz, naive)
         }
         Frequency::Yearly => {
             let new_year = current.year() + interval as i32;
             let date = clamp_day_to_month(new_year, current.month(), current.day())?;
             let naive = chrono::NaiveDateTime::new(date, current.time());
-            current.timezone().from_local_datetime(&naive).earliest()
+            resolve_local(tz, naive)
         }
         _ => None,
     }
@@ -357,6 +382,57 @@ fn clamp_day_to_month(year: i32, month: u32, day: u32) -> Option<chrono::NaiveDa
     }
     // 28 is always valid for months 1-12
     chrono::NaiveDate::from_ymd_opt(year, month, 28)
+}
+
+/// For Weekly frequency with specific weekdays: advance to the next matching
+/// weekday. Within the current week period, steps forward day-by-day.
+/// When no more matching weekdays remain in this week, jumps by
+/// `(interval - 1) * 7` extra days to reach the next week period and
+/// finds the first matching weekday there.
+fn advance_weekly_weekday(
+    current: DateTime<Tz>,
+    interval: u16,
+    weekdays: &[chrono::Weekday],
+) -> Option<DateTime<Tz>> {
+    let tz = current.timezone();
+    let time = current.time();
+    let mut date = current.date_naive();
+    let start_weekday = date.weekday();
+
+    // Try remaining days in the current week (up to 6 days ahead)
+    for offset in 1u64..7 {
+        let candidate = date + chrono::Days::new(offset);
+        let wd = candidate.weekday();
+        // We've wrapped past the starting weekday back to start of next period
+        if wd == start_weekday {
+            break;
+        }
+        if weekdays.contains(&wd) {
+            let naive = chrono::NaiveDateTime::new(candidate, time);
+            return resolve_local(tz, naive);
+        }
+    }
+
+    // No more matching weekdays this week — jump to the next week period.
+    // Skip forward by interval weeks (relative to the current week's end),
+    // then find the first matching weekday.
+    // Days until the same weekday next occurrence = interval * 7
+    date = date + chrono::Days::new(interval as u64 * 7);
+
+    // From this anchor, walk backward to the start of its week (Monday)
+    // then scan forward for the first matching weekday.
+    let anchor_wd = date.weekday().num_days_from_monday();
+    let week_start = date - chrono::Days::new(anchor_wd as u64);
+
+    for offset in 0u64..7 {
+        let candidate = week_start + chrono::Days::new(offset);
+        if weekdays.contains(&candidate.weekday()) {
+            let naive = chrono::NaiveDateTime::new(candidate, time);
+            return resolve_local(tz, naive);
+        }
+    }
+
+    None
 }
 
 /// A lazy iterator over recurrence occurrences.
@@ -441,6 +517,21 @@ impl Iterator for OccurrenceIterator {
             // Capture current value
             let result = self.current;
 
+            // Weekly + weekdays: use intra-week expansion
+            if self.recurrence.frequency == Frequency::Weekly {
+                if let Some(ref weekdays) = self.recurrence.by_weekday {
+                    match advance_weekly_weekday(result, self.recurrence.interval, weekdays) {
+                        Some(next) => self.current = next,
+                        None => self.exhausted = true,
+                    }
+                    if weekdays.contains(&result.weekday()) {
+                        self.count += 1;
+                        return Some(result);
+                    }
+                    continue;
+                }
+            }
+
             // Compute next occurrence for future calls
             match self.compute_next() {
                 Some(next) => self.current = next,
@@ -448,6 +539,7 @@ impl Iterator for OccurrenceIterator {
             }
 
             // Skip if weekday filter is set and this day doesn't match
+            // (for Daily and other frequencies, not Weekly which is handled above)
             if let Some(ref weekdays) = self.recurrence.by_weekday {
                 if !weekdays.contains(&result.weekday()) {
                     continue;

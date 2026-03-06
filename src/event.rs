@@ -92,14 +92,20 @@ impl Event {
         max_occurrences: usize,
     ) -> Result<Vec<DateTime<Tz>>> {
         if let Some(ref recurrence) = self.recurrence {
-            let mut occurrences =
-                recurrence.generate_occurrences(self.start_time, max_occurrences)?;
-
-            // Filter by intersection: occurrence's time span must overlap the query window.
-            // An occurrence at `dt` with the event's duration intersects [start, end] when:
-            //   dt < end  AND  dt + duration > start
             let duration = self.duration();
-            occurrences.retain(|dt| *dt < end && *dt + duration > start);
+
+            // Use lazy iterator so we never cap *before* the window filter.
+            // The iterator naturally respects count/until limits on the series.
+            let mut occurrences: Vec<DateTime<Tz>> = recurrence
+                .occurrences(self.start_time)
+                // Stop once occurrences are entirely past the query window.
+                // Series is chronological, so once dt + duration <= start we skip,
+                // and once dt >= end nothing later can intersect either.
+                .take_while(|dt| *dt < end)
+                // Intersection filter: occurrence's time span overlaps [start, end]
+                .filter(|dt| *dt + duration > start)
+                .take(max_occurrences)
+                .collect();
 
             // Apply recurrence filter if present
             if let Some(ref filter) = self.recurrence_filter {
