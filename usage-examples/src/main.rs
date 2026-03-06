@@ -5,6 +5,7 @@
 use eventix::{gap_validation, timezone, Calendar, Duration, Event, Recurrence};
 
 mod booking_workflow;
+mod json_web;
 
 fn main() -> eventix::Result<()> {
     println!("=== Using Published Eventix Crate ===\n");
@@ -52,7 +53,9 @@ fn main() -> eventix::Result<()> {
     cal.export_to_ics("examples_output/schedule.ics")?;
     println!("💾 Exported calendar to examples_output/schedule.ics");
 
+    // Run other examples
     booking_workflow::run()?;
+    json_web::run()?;
 
     Ok(())
 }
