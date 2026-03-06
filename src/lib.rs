@@ -127,8 +127,8 @@ mod error;
 pub use calendar::Calendar;
 pub use error::{EventixError, Result};
 pub use event::{Event, EventBuilder, EventStatus};
-pub use recurrence::Recurrence;
+pub use recurrence::{OccurrenceIterator, Recurrence};
 
-// Re-export commonly used types
-pub use chrono::{DateTime, Duration, NaiveDateTime};
+// Re-export commonly used types from chrono
+pub use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 pub use chrono_tz::Tz;

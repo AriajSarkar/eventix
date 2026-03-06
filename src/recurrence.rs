@@ -188,9 +188,13 @@ impl Recurrence {
         Ok(format!("DTSTART:{}\nRRULE:{}", dtstart.format("%Y%m%dT%H%M%S"), rrule_str))
     }
 
-    /// Generate occurrences for this recurrence pattern
+    /// Generate occurrences for this recurrence pattern (eager, allocates Vec)
     ///
-    /// Returns a vector of `DateTime<Tz>` representing each occurrence
+    /// Returns a vector of `DateTime<Tz>` representing each occurrence.
+    ///
+    /// # Note
+    /// For better memory efficiency with large recurrence counts, consider using
+    /// the lazy [`occurrences()`](Self::occurrences) method instead.
     pub fn generate_occurrences(
         &self,
         start: DateTime<Tz>,
@@ -269,6 +273,190 @@ impl Recurrence {
         }
 
         Ok(occurrences)
+    }
+
+    /// Create a lazy iterator over occurrences of this recurrence pattern.
+    ///
+    /// Unlike [`generate_occurrences()`](Self::generate_occurrences), this method
+    /// returns an iterator that computes each occurrence on demand, avoiding
+    /// upfront memory allocation for large or infinite recurrence patterns.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use eventix::{Recurrence, timezone};
+    ///
+    /// let tz = timezone::parse_timezone("UTC").unwrap();
+    /// let start = timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+    ///
+    /// let recurrence = Recurrence::daily().count(365);
+    ///
+    /// // Lazy: only computes what you consume
+    /// let first_week: Vec<_> = recurrence.occurrences(start).take(7).collect();
+    /// assert_eq!(first_week.len(), 7);
+    ///
+    /// // Skip directly to a future occurrence without computing all intermediate dates
+    /// let tenth = recurrence.occurrences(start).nth(9);
+    /// assert!(tenth.is_some());
+    /// ```
+    pub fn occurrences(&self, start: DateTime<Tz>) -> OccurrenceIterator {
+        OccurrenceIterator::new(self.clone(), start)
+    }
+}
+
+/// A lazy iterator over recurrence occurrences.
+///
+/// Created by [`Recurrence::occurrences()`]. This iterator computes each
+/// occurrence on demand, making it memory-efficient for large or infinite
+/// recurrence patterns.
+///
+/// # Examples
+///
+/// ```
+/// use eventix::{Recurrence, timezone};
+///
+/// let tz = timezone::parse_timezone("UTC").unwrap();
+/// let start = timezone::parse_datetime_with_tz("2025-06-01 10:00:00", tz).unwrap();
+///
+/// // Daily recurrence for 30 days
+/// let daily = Recurrence::daily().count(30);
+///
+/// // Iterate lazily - computes dates as needed
+/// for occurrence in daily.occurrences(start).take(5) {
+///     println!("Occurrence: {}", occurrence);
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct OccurrenceIterator {
+    recurrence: Recurrence,
+    current: DateTime<Tz>,
+    count: u32,
+    exhausted: bool,
+}
+
+impl OccurrenceIterator {
+    /// Create a new occurrence iterator
+    fn new(recurrence: Recurrence, start: DateTime<Tz>) -> Self {
+        Self {
+            recurrence,
+            current: start,
+            count: 0,
+            exhausted: false,
+        }
+    }
+
+    /// Check if the iterator is exhausted
+    fn is_exhausted(&self) -> bool {
+        if self.exhausted {
+            return true;
+        }
+
+        // Check count limit
+        if let Some(max_count) = self.recurrence.count {
+            if self.count >= max_count {
+                return true;
+            }
+        }
+
+        // Check until date
+        if let Some(until) = self.recurrence.until {
+            if self.current > until {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Compute the next occurrence date
+    fn compute_next(&self) -> Option<DateTime<Tz>> {
+        match self.recurrence.frequency {
+            Frequency::Daily => {
+                Some(self.current + chrono::Duration::days(self.recurrence.interval as i64))
+            }
+            Frequency::Weekly => {
+                Some(self.current + chrono::Duration::weeks(self.recurrence.interval as i64))
+            }
+            Frequency::Monthly => {
+                let months_to_add = self.recurrence.interval as i32;
+                let mut new_month = self.current.month() as i32 + months_to_add;
+                let mut new_year = self.current.year();
+
+                while new_month > 12 {
+                    new_month -= 12;
+                    new_year += 1;
+                }
+
+                let new_date = self
+                    .current
+                    .date_naive()
+                    .with_year(new_year)
+                    .and_then(|d| d.with_month(new_month as u32));
+
+                match new_date {
+                    Some(date) => {
+                        let time = self.current.time();
+                        let naive = chrono::NaiveDateTime::new(date, time);
+                        self.current.timezone().from_local_datetime(&naive).earliest()
+                    }
+                    None => None,
+                }
+            }
+            Frequency::Yearly => {
+                let new_year = self.current.year() + self.recurrence.interval as i32;
+                let new_date = self.current.date_naive().with_year(new_year);
+
+                match new_date {
+                    Some(date) => {
+                        let time = self.current.time();
+                        let naive = chrono::NaiveDateTime::new(date, time);
+                        self.current.timezone().from_local_datetime(&naive).earliest()
+                    }
+                    None => None,
+                }
+            }
+            _ => None, // Unsupported frequency
+        }
+    }
+}
+
+impl Iterator for OccurrenceIterator {
+    type Item = DateTime<Tz>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_exhausted() {
+            return None;
+        }
+
+        // Capture current value to return
+        let result = self.current;
+
+        // Compute next occurrence for future calls
+        match self.compute_next() {
+            Some(next) => {
+                self.current = next;
+                self.count += 1;
+            }
+            None => {
+                self.exhausted = true;
+                self.count += 1;
+            }
+        }
+
+        Some(result)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if let Some(max_count) = self.recurrence.count {
+            let remaining = max_count.saturating_sub(self.count) as usize;
+            (0, Some(remaining))
+        } else if self.recurrence.until.is_some() {
+            // Cannot determine exact size without computing
+            (0, None)
+        } else {
+            // Infinite recurrence
+            (0, None)
+        }
     }
 }
 
@@ -359,5 +547,90 @@ mod tests {
 
         assert!(filter.should_skip(&saturday));
         assert!(!filter.should_skip(&monday));
+    }
+
+    #[test]
+    fn test_lazy_iterator_equivalence() {
+        // Lazy iterator should produce same results as eager method
+        let recurrence = Recurrence::daily().count(10);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+
+        let eager: Vec<_> = recurrence.generate_occurrences(start, 10).unwrap();
+        let lazy: Vec<_> = recurrence.occurrences(start).collect();
+
+        assert_eq!(eager.len(), lazy.len());
+        for (e, l) in eager.iter().zip(lazy.iter()) {
+            assert_eq!(e, l);
+        }
+    }
+
+    #[test]
+    fn test_lazy_iterator_take() {
+        // Can take fewer items than the limit
+        let recurrence = Recurrence::daily().count(100);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-03-15 14:00:00", tz).unwrap();
+
+        let first_5: Vec<_> = recurrence.occurrences(start).take(5).collect();
+        assert_eq!(first_5.len(), 5);
+        assert_eq!(first_5[0], start);
+    }
+
+    #[test]
+    fn test_lazy_iterator_nth() {
+        // Can skip directly to nth occurrence
+        let recurrence = Recurrence::weekly().count(52);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 12:00:00", tz).unwrap();
+
+        let tenth = recurrence.occurrences(start).nth(9);
+        assert!(tenth.is_some());
+
+        // Verify it's 9 weeks later (nth(9) = 10th occurrence, which is start + 9 intervals)
+        let expected = start + chrono::Duration::weeks(9);
+        assert_eq!(tenth.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_lazy_iterator_size_hint() {
+        let recurrence = Recurrence::daily().count(30);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-01 08:00:00", tz).unwrap();
+
+        let iter = recurrence.occurrences(start);
+        let (min, max) = iter.size_hint();
+        assert_eq!(min, 0);
+        assert_eq!(max, Some(30));
+    }
+
+    #[test]
+    fn test_lazy_iterator_monthly() {
+        let recurrence = Recurrence::monthly().count(6);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-15 10:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 6);
+
+        // Check months are Jan, Feb, Mar, Apr, May, Jun
+        for (i, occ) in occurrences.iter().enumerate() {
+            assert_eq!(occ.month(), (1 + i) as u32);
+        }
+    }
+
+    #[test]
+    fn test_lazy_iterator_yearly() {
+        let recurrence = Recurrence::yearly().count(5);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-07-04 00:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 5);
+
+        // Check years are 2025-2029
+        for (i, occ) in occurrences.iter().enumerate() {
+            assert_eq!(occ.year(), 2025 + i as i32);
+        }
     }
 }
