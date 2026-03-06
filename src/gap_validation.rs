@@ -292,8 +292,7 @@ pub fn find_overlaps(
     // Sort by: (1) time ascending, (2) END before START at equal timestamps.
     // Rust's bool ordering: false < true, so we reverse to place true (END) first.
     checkpoints.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then_with(|| b.1.cmp(&a.1)) // reverse: END (true) before START (false)
+        a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)) // reverse: END (true) before START (false)
     });
 
     let mut active: HashSet<usize> = HashSet::new();
