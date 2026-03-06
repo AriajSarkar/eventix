@@ -590,4 +590,63 @@ mod tests {
             assert_eq!(occ.year(), 2025 + i as i32);
         }
     }
+
+    #[test]
+    fn test_lazy_iterator_until() {
+        // Test the `until` exhaustion path in is_exhausted()
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2025-01-05 09:00:00", tz).unwrap();
+
+        let recurrence = Recurrence::daily().until(end);
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+
+        // Should include Jan 1-5 (5 days)
+        assert_eq!(occurrences.len(), 5);
+        assert_eq!(occurrences.last().unwrap(), &end);
+    }
+
+    #[test]
+    fn test_lazy_iterator_size_hint_until() {
+        // size_hint with `until` returns (0, None) since exact count is unknown
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2025-12-31 09:00:00", tz).unwrap();
+
+        let recurrence = Recurrence::daily().until(end);
+        let iter = recurrence.occurrences(start);
+        let (min, max) = iter.size_hint();
+        assert_eq!(min, 0);
+        assert_eq!(max, None);
+    }
+
+    #[test]
+    fn test_lazy_iterator_size_hint_infinite() {
+        // size_hint with no count and no until returns (0, None)
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+
+        let recurrence = Recurrence::daily();
+        let iter = recurrence.occurrences(start);
+        let (min, max) = iter.size_hint();
+        assert_eq!(min, 0);
+        assert_eq!(max, None);
+    }
+
+    #[test]
+    fn test_lazy_iterator_with_interval() {
+        // Test bi-weekly via lazy iterator
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 10:00:00", tz).unwrap();
+
+        let recurrence = Recurrence::weekly().interval(2).count(4);
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+
+        assert_eq!(occurrences.len(), 4);
+        // Each occurrence should be 2 weeks apart
+        for i in 1..occurrences.len() {
+            let diff = occurrences[i] - occurrences[i - 1];
+            assert_eq!(diff, chrono::Duration::weeks(2));
+        }
+    }
 }
