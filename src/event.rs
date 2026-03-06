@@ -95,8 +95,11 @@ impl Event {
             let mut occurrences =
                 recurrence.generate_occurrences(self.start_time, max_occurrences)?;
 
-            // Filter by date range
-            occurrences.retain(|dt| *dt >= start && *dt <= end);
+            // Filter by intersection: occurrence's time span must overlap the query window.
+            // An occurrence at `dt` with the event's duration intersects [start, end] when:
+            //   dt < end  AND  dt + duration > start
+            let duration = self.duration();
+            occurrences.retain(|dt| *dt < end && *dt + duration > start);
 
             // Apply recurrence filter if present
             if let Some(ref filter) = self.recurrence_filter {
@@ -110,8 +113,9 @@ impl Event {
 
             Ok(occurrences)
         } else {
-            // Non-recurring event
-            if self.start_time >= start && self.start_time <= end {
+            // Non-recurring event: intersection check
+            let event_end = self.end_time;
+            if self.start_time < end && event_end > start {
                 Ok(vec![self.start_time])
             } else {
                 Ok(vec![])
