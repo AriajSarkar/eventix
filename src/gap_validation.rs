@@ -252,37 +252,72 @@ pub fn find_overlaps(
     start: DateTime<Tz>,
     end: DateTime<Tz>,
 ) -> Result<Vec<EventOverlap>> {
+    use std::collections::HashSet;
+
     let mut occurrences = calendar.events_between(start, end)?;
 
     // Filter out inactive events
     occurrences.retain(|e| e.event.is_active());
 
+    // Filter out zero-duration events (where start == end)
+    // These would cause the END checkpoint to be processed before START
+    // due to the sorting order (ends before starts at same time),
+    // resulting in the event never being added to the active set.
+    occurrences.retain(|occ| occ.occurrence_time != occ.end_time());
+
+    // Early return for trivial cases (moved after zero-duration filter)
+    if occurrences.len() < 2 {
+        return Ok(Vec::new());
+    }
+
+    // Sweep Line Algorithm: O(N log N) instead of O(N²)
+    //
+    // Create checkpoints for each event's start and end.
+    // We use a tuple: (time, is_end, index)
+    // - is_end=true (1) means this is an END checkpoint
+    // - is_end=false (0) means this is a START checkpoint
+    //
+    // CRITICAL: When times are equal, process ENDS before STARTS.
+    // This prevents false positives for "touching" events.
+    // Example: Event A ends at 10:00, Event B starts at 10:00
+    // - If we process B's start before A's end, we'd think they overlap
+    // - By processing A's end first, A is removed before B is added
+    let mut checkpoints: Vec<(DateTime<Tz>, bool, usize)> =
+        Vec::with_capacity(occurrences.len() * 2);
+    for (i, occ) in occurrences.iter().enumerate() {
+        checkpoints.push((occ.occurrence_time, false, i)); // START checkpoint
+        checkpoints.push((occ.end_time(), true, i)); // END checkpoint
+    }
+
+    // Sort by: (1) time, (2) is_end (true/end comes before false/start)
+    // This ensures ends are processed before starts at the same timestamp
+    checkpoints.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+
+    let mut active: HashSet<usize> = HashSet::new();
     let mut overlaps = Vec::new();
 
-    // Check each pair of events for overlap
-    for i in 0..occurrences.len() {
-        for j in (i + 1)..occurrences.len() {
-            let event1 = &occurrences[i];
-            let event2 = &occurrences[j];
+    for (_time, is_end, idx) in checkpoints {
+        if is_end {
+            // Event ending - remove from active set
+            active.remove(&idx);
+        } else {
+            // Event starting - check for overlaps with all currently active events
+            for &active_idx in &active {
+                let e1 = &occurrences[idx];
+                let e2 = &occurrences[active_idx];
 
-            let start1 = event1.occurrence_time;
-            let end1 = event1.end_time();
-            let start2 = event2.occurrence_time;
-            let end2 = event2.end_time();
+                // Calculate the actual overlap region
+                let overlap_start = e1.occurrence_time.max(e2.occurrence_time);
+                let overlap_end = e1.end_time().min(e2.end_time());
 
-            // Check if they overlap
-            if start1 < end2 && start2 < end1 {
-                let overlap_start = start1.max(start2);
-                let overlap_end = end1.min(end2);
-
-                let overlap = EventOverlap::new(
+                overlaps.push(EventOverlap::new(
                     overlap_start,
                     overlap_end,
-                    vec![event1.title().to_string(), event2.title().to_string()],
-                );
-
-                overlaps.push(overlap);
+                    vec![e1.title().to_string(), e2.title().to_string()],
+                ));
             }
+            // Add this event to the active set
+            active.insert(idx);
         }
     }
 
