@@ -289,9 +289,12 @@ pub fn find_overlaps(
         checkpoints.push((occ.end_time(), true, i)); // END checkpoint
     }
 
-    // Sort by: (1) time, (2) is_end (true/end comes before false/start)
-    // This ensures ends are processed before starts at the same timestamp
-    checkpoints.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)));
+    // Sort by: (1) time ascending, (2) END before START at equal timestamps.
+    // Rust's bool ordering: false < true, so we reverse to place true (END) first.
+    checkpoints.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| b.1.cmp(&a.1)) // reverse: END (true) before START (false)
+    });
 
     let mut active: HashSet<usize> = HashSet::new();
     let mut overlaps = Vec::new();
