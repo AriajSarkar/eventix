@@ -2,7 +2,7 @@
 //!
 //! Simple examples for REST APIs and web frontends.
 
-use eventix::{Calendar, Event, Recurrence, Utc};
+use eventix::{Calendar, Event, Utc};
 use serde_json::{json, Value};
 
 /// Import calendar from JSON (like from a POST request)
@@ -59,10 +59,9 @@ pub fn run() -> eventix::Result<()> {
             .title("Weekly Sync")
             .start("2025-03-20 10:00:00", "UTC")
             .duration_hours(1)
-            .recurrence(Recurrence::weekly().count(4))
             .build()?,
     );
-    println!("➕ Added recurring event");
+    println!("➕ Added event");
 
     // 3. Export
     let json = export_to_web(&cal)?;

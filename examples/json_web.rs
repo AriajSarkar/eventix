@@ -5,7 +5,7 @@
 //!
 //! Run with: cargo run --example json_web
 
-use eventix::{Calendar, Event, Recurrence, Utc};
+use eventix::{Calendar, Event, Utc};
 use serde_json::json;
 
 fn main() -> anyhow::Result<()> {
@@ -29,7 +29,6 @@ fn main() -> anyhow::Result<()> {
             .title("Sprint Planning")
             .start("2025-01-15 14:00:00", "UTC")
             .duration_hours(2)
-            .recurrence(Recurrence::weekly().count(4))
             .build()?,
     );
 
