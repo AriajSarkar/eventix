@@ -216,6 +216,20 @@ impl Recurrence {
                 }
             }
 
+            // Skip if weekday filter is set and this day doesn't match
+            if let Some(ref weekdays) = self.by_weekday {
+                if !weekdays.contains(&current.weekday()) {
+                    // Advance without adding to results
+                    match advance_by_frequency(current, self.frequency, self.interval) {
+                        Some(next) => {
+                            current = next;
+                            continue;
+                        }
+                        None => break,
+                    }
+                }
+            }
+
             occurrences.push(current);
 
             // Advance to next occurrence using shared helper
@@ -279,6 +293,9 @@ fn advance_by_frequency(
     frequency: Frequency,
     interval: u16,
 ) -> Option<DateTime<Tz>> {
+    if interval == 0 {
+        return None;
+    }
     match frequency {
         Frequency::Daily => Some(current + chrono::Duration::days(interval as i64)),
         Frequency::Weekly => Some(current + chrono::Duration::weeks(interval as i64)),
@@ -398,26 +415,35 @@ impl Iterator for OccurrenceIterator {
     type Item = DateTime<Tz>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.is_exhausted() {
-            return None;
-        }
-
-        // Capture current value to return
-        let result = self.current;
-
-        // Compute next occurrence for future calls
-        match self.compute_next() {
-            Some(next) => {
-                self.current = next;
-                self.count += 1;
+        loop {
+            if self.is_exhausted() {
+                return None;
             }
-            None => {
-                self.exhausted = true;
-                self.count += 1;
-            }
-        }
 
-        Some(result)
+            // Capture current value
+            let result = self.current;
+
+            // Compute next occurrence for future calls
+            match self.compute_next() {
+                Some(next) => {
+                    self.current = next;
+                    self.count += 1;
+                }
+                None => {
+                    self.exhausted = true;
+                    self.count += 1;
+                }
+            }
+
+            // Skip if weekday filter is set and this day doesn't match
+            if let Some(ref weekdays) = self.recurrence.by_weekday {
+                if !weekdays.contains(&result.weekday()) {
+                    continue;
+                }
+            }
+
+            return Some(result);
+        }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -697,5 +723,68 @@ mod tests {
         assert_eq!(occurrences[1].day(), 28); // 2025 not a leap year
         assert_eq!(occurrences[1].year(), 2025);
         assert_eq!(occurrences[2].day(), 28); // 2026 not a leap year
+    }
+
+    #[test]
+    fn test_zero_interval_does_not_loop() {
+        // interval(0) should cause the iterator to terminate immediately
+        let recurrence = Recurrence::daily().interval(0).count(10);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+
+        // Lazy: should yield just the start, then stop (advance returns None)
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0], start);
+
+        // Eager: same behavior
+        let eager = recurrence.generate_occurrences(start, 10).unwrap();
+        assert_eq!(eager.len(), 1);
+    }
+
+    #[test]
+    fn test_weekdays_filter_lazy() {
+        use rrule::Weekday;
+        // Weekly recurrence on Mon/Wed/Fri with daily interval
+        // Start on a Monday (2025-01-06)
+        let recurrence = Recurrence::daily()
+            .weekdays(vec![Weekday::Mon, Weekday::Wed, Weekday::Fri])
+            .count(14); // 14 daily slots, should yield ~6 matching days
+
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+
+        // All results should be Mon, Wed, or Fri
+        for occ in &occurrences {
+            let wd = occ.weekday();
+            assert!(
+                wd == Weekday::Mon || wd == Weekday::Wed || wd == Weekday::Fri,
+                "unexpected weekday: {:?}",
+                wd
+            );
+        }
+        // 14 daily slots from Mon Jan 6: Mon6,Wed8,Fri10,Mon13,Wed15,Fri17 = 6
+        assert_eq!(occurrences.len(), 6);
+    }
+
+    #[test]
+    fn test_weekdays_filter_eager() {
+        use rrule::Weekday;
+        let recurrence = Recurrence::daily()
+            .weekdays(vec![Weekday::Mon, Weekday::Wed, Weekday::Fri])
+            .count(14);
+
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
+
+        let eager = recurrence.generate_occurrences(start, 14).unwrap();
+        let lazy: Vec<_> = recurrence.occurrences(start).collect();
+
+        assert_eq!(eager.len(), lazy.len());
+        for (e, l) in eager.iter().zip(lazy.iter()) {
+            assert_eq!(e, l);
+        }
     }
 }
