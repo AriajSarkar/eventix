@@ -252,7 +252,7 @@ pub fn find_overlaps(
     start: DateTime<Tz>,
     end: DateTime<Tz>,
 ) -> Result<Vec<EventOverlap>> {
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
 
     let mut occurrences = calendar.events_between(start, end)?;
 
@@ -295,7 +295,7 @@ pub fn find_overlaps(
         a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)) // reverse: END (true) before START (false)
     });
 
-    let mut active: HashSet<usize> = HashSet::new();
+    let mut active: BTreeSet<usize> = BTreeSet::new();
     let mut overlaps = Vec::new();
 
     for (_time, is_end, idx) in checkpoints {
