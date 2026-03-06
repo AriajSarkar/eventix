@@ -473,5 +473,13 @@ mod tests {
             .end("2025-11-01 09:00:00")
             .build();
         assert!(result.is_err());
+
+        // Zero-duration events are rejected by the builder
+        let result = Event::builder()
+            .title("Zero")
+            .start("2025-11-01 10:00:00", "UTC")
+            .duration_minutes(0)
+            .build();
+        assert!(result.is_err());
     }
 }
