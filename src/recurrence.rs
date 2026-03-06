@@ -206,6 +206,12 @@ impl Recurrence {
         let mut occurrences = Vec::new();
         let mut current = start;
 
+        // TODO: This eager cap silently drops valid occurrences in long-range queries
+        // (e.g. a daily rule across a large window with max_occurrences = 1000 will
+        // under-report results with no indication the vector is partial). Consider
+        // driving callers through the lazy iterator up to the requested end bound,
+        // or surfacing truncation explicitly. Deferred — changing `generate_occurrences`
+        // signature is a breaking API change that belongs in a separate PR.
         let count_limit = self.count.unwrap_or(max_occurrences as u32).min(max_occurrences as u32);
 
         for _ in 0..count_limit {
