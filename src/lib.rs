@@ -6,7 +6,7 @@
 //! ## Features
 //!
 //! - **Timezone-aware events**: All date/time fields use `chrono` with `chrono-tz` for proper timezone handling
-//! - **Recurrence rules**: Support for daily, weekly, monthly, and yearly recurrence patterns
+//! - **Recurrence rules**: Support for all seven RFC 5545 frequencies (secondly, minutely, hourly, daily, weekly, monthly, yearly)
 //! - **Exceptions**: Skip specific dates or apply custom filters (e.g., skip weekends)
 //! - **ICS support**: Import and export events using the iCalendar format (RFC 5545 compliant with TZID support)
 //! - **Builder API**: Ergonomic, fluent interface for creating events and calendars
@@ -110,7 +110,7 @@
 //!
 //! See the `examples/` directory for more comprehensive examples:
 //! - `basic.rs` - Simple calendar creation and event management
-//! - `recurrence.rs` - Daily, weekly, monthly, and yearly recurrence patterns
+//! - `recurrence.rs` - All seven RFC 5545 recurrence frequencies with lazy iteration and DST handling
 //! - `ics_export.rs` - ICS import/export functionality
 //! - `timezone_ics_export.rs` - Timezone-aware ICS export demonstration
 //! - `gap_validation.rs` - Schedule analysis and gap detection features

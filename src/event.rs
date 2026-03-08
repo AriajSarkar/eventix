@@ -85,37 +85,40 @@ impl Event {
     ///
     /// For non-recurring events, returns a single occurrence.
     /// For recurring events, generates all occurrences based on the recurrence rule.
+    ///
+    /// Filtering is applied lazily: each candidate occurrence is checked against
+    /// the time-window intersection, recurrence filter, and exception dates
+    /// *before* counting toward `max_occurrences`. This ensures:
+    /// - Filtered-out dates never consume result slots.
+    /// - At most `max_occurrences` accepted results are collected, regardless
+    ///   of how dense the underlying recurrence is.
     pub fn occurrences_between(
         &self,
         start: DateTime<Tz>,
         end: DateTime<Tz>,
         max_occurrences: usize,
     ) -> Result<Vec<DateTime<Tz>>> {
+        if max_occurrences == 0 {
+            return Ok(vec![]);
+        }
+
         if let Some(ref recurrence) = self.recurrence {
             let duration = self.duration();
 
-            // Use lazy iterator so we never cap *before* the window filter.
-            // The iterator naturally respects count/until limits on the series.
-            let mut occurrences: Vec<DateTime<Tz>> = recurrence
+            let occurrences: Vec<DateTime<Tz>> = recurrence
                 .occurrences(self.start_time)
                 // Stop once occurrences are entirely past the query window.
-                // Series is chronological, so once dt + duration <= start we skip,
-                // and once dt >= end nothing later can intersect either.
+                // Series is chronological, so once dt >= end nothing later
+                // can intersect either.
                 .take_while(|dt| *dt < end)
                 // Intersection filter: occurrence's time span overlaps [start, end]
                 .filter(|dt| *dt + duration > start)
+                // Apply recurrence filter (skip weekends / skip dates) per element
+                .filter(|dt| !self.is_occurrence_excluded(dt))
+                // Stop as soon as we have enough accepted results — never
+                // allocate beyond what the caller asked for.
                 .take(max_occurrences)
                 .collect();
-
-            // Apply recurrence filter if present
-            if let Some(ref filter) = self.recurrence_filter {
-                occurrences = filter.filter_occurrences(occurrences);
-            }
-
-            // Remove exception dates
-            occurrences.retain(|dt| {
-                !self.exdates.iter().any(|exdate| exdate.date_naive() == dt.date_naive())
-            });
 
             Ok(occurrences)
         } else {
@@ -127,6 +130,23 @@ impl Event {
                 Ok(vec![])
             }
         }
+    }
+
+    /// Check whether a single occurrence should be excluded by recurrence
+    /// filter or exception dates.
+    ///
+    /// Returns `true` when the occurrence must be **skipped**.
+    fn is_occurrence_excluded(&self, dt: &DateTime<Tz>) -> bool {
+        // Recurrence filter (skip weekends, skip specific dates, …)
+        if let Some(ref filter) = self.recurrence_filter {
+            if filter.should_skip(dt) {
+                return true;
+            }
+        }
+        // Exception dates
+        self.exdates
+            .iter()
+            .any(|exdate| exdate.date_naive() == dt.date_naive())
     }
 
     /// Check if this event occurs on a specific date
@@ -491,5 +511,149 @@ mod tests {
             .duration_minutes(0)
             .build();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_occurrences_between_filter_before_cap() {
+        use crate::timezone::parse_timezone;
+        use crate::Recurrence;
+        use chrono::Datelike;
+
+        let tz = parse_timezone("UTC").unwrap();
+
+        // Daily recurrence starting Friday 2025-01-03, with weekend skipping.
+        // Fri, Sat, Sun, Mon, Tue, Wed, Thu...
+        // With skip_weekends, valid days are Fri(3), Mon(6), Tue(7), Wed(8)...
+        let event = Event::builder()
+            .title("Daily standup")
+            .start("2025-01-03 09:00:00", "UTC") // Friday
+            .duration_hours(1)
+            .recurrence(Recurrence::daily().count(30))
+            .skip_weekends(true)
+            .build()
+            .unwrap();
+
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-03 00:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2025-01-15 00:00:00", tz).unwrap();
+
+        // max_occurrences=3: should return 3 weekday results, not be eaten
+        // by Sat/Sun consuming cap slots before filter removes them.
+        let occs = event.occurrences_between(start, end, 3).unwrap();
+        assert_eq!(occs.len(), 3);
+
+        // All results should be weekdays
+        for occ in &occs {
+            let wd = occ.weekday();
+            assert!(
+                wd != chrono::Weekday::Sat && wd != chrono::Weekday::Sun,
+                "weekend snuck through: {:?}",
+                wd
+            );
+        }
+    }
+
+    /// Stress test: secondly recurrence over a 24-hour window requesting only 10.
+    /// The window contains 86 400 candidate seconds but we must collect at most 10.
+    #[test]
+    fn test_dense_secondly_does_not_over_allocate() {
+        use crate::timezone::parse_timezone;
+        use crate::Recurrence;
+
+        let tz = parse_timezone("UTC").unwrap();
+
+        let event = Event::builder()
+            .title("Tick")
+            .start("2025-06-01 00:00:00", "UTC")
+            .duration(Duration::seconds(1))
+            .recurrence(Recurrence::secondly().interval(1).count(100_000))
+            .build()
+            .unwrap();
+
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-01 00:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2025-06-02 00:00:00", tz).unwrap();
+
+        let occs = event.occurrences_between(start, end, 10).unwrap();
+        assert_eq!(occs.len(), 10);
+        // Verify spacing
+        for i in 1..occs.len() {
+            assert_eq!(occs[i] - occs[i - 1], Duration::seconds(1));
+        }
+    }
+
+    /// Stress test: minutely recurrence over a 30-day window requesting only 5.
+    #[test]
+    fn test_dense_minutely_capped_early() {
+        use crate::timezone::parse_timezone;
+        use crate::Recurrence;
+
+        let tz = parse_timezone("UTC").unwrap();
+
+        let event = Event::builder()
+            .title("Ping")
+            .start("2025-06-01 00:00:00", "UTC")
+            .duration(Duration::seconds(10))
+            .recurrence(Recurrence::minutely().interval(1).count(100_000))
+            .build()
+            .unwrap();
+
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-01 00:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2025-07-01 00:00:00", tz).unwrap();
+
+        let occs = event.occurrences_between(start, end, 5).unwrap();
+        assert_eq!(occs.len(), 5);
+        for i in 1..occs.len() {
+            assert_eq!(occs[i] - occs[i - 1], Duration::minutes(1));
+        }
+    }
+
+    /// Stress test: hourly recurrence with weekend filter over a 1-year window.
+    /// Ensures filter + cap work together lazily without blowup.
+    #[test]
+    fn test_dense_hourly_with_weekend_filter() {
+        use crate::timezone::parse_timezone;
+        use crate::Recurrence;
+        use chrono::Datelike;
+
+        let tz = parse_timezone("UTC").unwrap();
+
+        let event = Event::builder()
+            .title("Hourly Check")
+            .start("2025-01-06 08:00:00", "UTC") // Monday
+            .duration_minutes(5)
+            .recurrence(Recurrence::hourly().interval(1).count(100_000))
+            .skip_weekends(true)
+            .build()
+            .unwrap();
+
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 00:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2026-01-01 00:00:00", tz).unwrap();
+
+        let occs = event.occurrences_between(start, end, 20).unwrap();
+        assert_eq!(occs.len(), 20);
+        for occ in &occs {
+            let wd = occ.weekday();
+            assert!(
+                wd != chrono::Weekday::Sat && wd != chrono::Weekday::Sun,
+                "weekend occurrence found: {}",
+                occ
+            );
+        }
+    }
+
+    #[test]
+    fn test_occurrences_between_zero_cap_returns_empty() {
+        let event = Event::builder()
+            .title("One-off")
+            .start("2025-01-10 09:00:00", "UTC")
+            .duration_hours(1)
+            .build()
+            .unwrap();
+
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-10 00:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2025-01-11 00:00:00", tz).unwrap();
+
+        let occs = event.occurrences_between(start, end, 0).unwrap();
+        assert!(occs.is_empty());
     }
 }

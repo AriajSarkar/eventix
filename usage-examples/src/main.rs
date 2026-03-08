@@ -6,6 +6,7 @@ use eventix::{gap_validation, timezone, Calendar, Duration, Event, Recurrence};
 
 mod booking_workflow;
 mod json_web;
+mod v040_features;
 
 fn main() -> eventix::Result<()> {
     println!("=== Using Published Eventix Crate ===\n");
@@ -56,6 +57,7 @@ fn main() -> eventix::Result<()> {
     // Run other examples
     booking_workflow::run()?;
     json_web::run()?;
+    v040_features::run()?;
 
     Ok(())
 }

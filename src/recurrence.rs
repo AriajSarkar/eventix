@@ -16,7 +16,14 @@ pub struct Recurrence {
 }
 
 impl Recurrence {
-    /// Create a new recurrence pattern
+    /// Create a new recurrence pattern.
+    ///
+    /// All seven RFC 5545 frequencies are supported: `Secondly`, `Minutely`,
+    /// `Hourly`, `Daily`, `Weekly`, `Monthly`, and `Yearly`.
+    ///
+    /// For the most common cases prefer the typed convenience constructors
+    /// ([`daily()`](Self::daily), [`weekly()`](Self::weekly), etc.) which
+    /// give compile-time guarantees on the frequency value.
     pub fn new(frequency: Frequency) -> Self {
         Self {
             frequency,
@@ -77,6 +84,57 @@ impl Recurrence {
     /// ```
     pub fn yearly() -> Self {
         Self::new(Frequency::Yearly)
+    }
+
+    /// Create an hourly recurrence pattern.
+    ///
+    /// Uses **"same elapsed time"** semantics: each occurrence is exactly
+    /// `interval` hours after the previous one in UTC. During DST transitions
+    /// the local-time label may shift (e.g. 1:00 AM EST → 3:00 AM EDT when
+    /// clocks spring forward) but the actual interval is always exact.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use eventix::Recurrence;
+    ///
+    /// // Every 2 hours, 12 times
+    /// let schedule = Recurrence::hourly().interval(2).count(12);
+    /// ```
+    pub fn hourly() -> Self {
+        Self::new(Frequency::Hourly)
+    }
+
+    /// Create a minutely recurrence pattern.
+    ///
+    /// Uses **"same elapsed time"** semantics via fixed UTC duration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use eventix::Recurrence;
+    ///
+    /// // Every 15 minutes, 8 times
+    /// let schedule = Recurrence::minutely().interval(15).count(8);
+    /// ```
+    pub fn minutely() -> Self {
+        Self::new(Frequency::Minutely)
+    }
+
+    /// Create a secondly recurrence pattern.
+    ///
+    /// Uses **"same elapsed time"** semantics via fixed UTC duration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use eventix::Recurrence;
+    ///
+    /// // Every 30 seconds, 10 times
+    /// let schedule = Recurrence::secondly().interval(30).count(10);
+    /// ```
+    pub fn secondly() -> Self {
+        Self::new(Frequency::Secondly)
     }
 
     /// Set the interval between recurrences
@@ -189,13 +247,23 @@ impl Recurrence {
     }
 
     /// Generate occurrences for this recurrence pattern (eager, allocates Vec)
+    /// until the recurrence naturally exhausts via `count`, `until`, or
+    /// iterator termination.
     ///
     /// Returns a vector of `DateTime<Tz>` representing each occurrence.
     ///
     /// # Note
     /// For better memory efficiency with large recurrence counts, consider using
-    /// the lazy [`occurrences()`](Self::occurrences) method instead.
-    pub fn generate_occurrences(
+    /// the lazy [`occurrences()`](Self::occurrences) method instead. If you want
+    /// an eager `Vec` with an explicit hard cap, use
+    /// [`generate_occurrences_capped()`](Self::generate_occurrences_capped).
+    pub fn generate_occurrences(&self, start: DateTime<Tz>) -> Result<Vec<DateTime<Tz>>> {
+        Ok(self.occurrences(start).collect())
+    }
+
+    /// Generate occurrences eagerly but stop after `max_occurrences` accepted
+    /// items.
+    pub fn generate_occurrences_capped(
         &self,
         start: DateTime<Tz>,
         max_occurrences: usize,
@@ -205,9 +273,11 @@ impl Recurrence {
 
     /// Create a lazy iterator over occurrences of this recurrence pattern.
     ///
-    /// Unlike [`generate_occurrences()`](Self::generate_occurrences), this method
-    /// returns an iterator that computes each occurrence on demand, avoiding
-    /// upfront memory allocation for large or infinite recurrence patterns.
+    /// Unlike [`generate_occurrences()`](Self::generate_occurrences) and
+    /// [`generate_occurrences_capped()`](Self::generate_occurrences_capped),
+    /// this method returns an iterator that computes each occurrence on demand,
+    /// avoiding upfront memory allocation for large or infinite recurrence
+    /// patterns.
     ///
     /// # Examples
     ///
@@ -234,8 +304,8 @@ impl Recurrence {
 
 /// Advance a datetime by the given frequency and interval.
 ///
-/// Shared helper used by both the eager `generate_occurrences()` path and
-/// the lazy `OccurrenceIterator`.
+/// Shared helper used by the eager generation helpers and the lazy
+/// `OccurrenceIterator`.
 ///
 /// Resolve a `NaiveDateTime` to a timezone-aware `DateTime<Tz>`, handling
 /// DST transitions:
@@ -263,24 +333,27 @@ fn resolve_local(tz: Tz, naive: chrono::NaiveDateTime) -> Option<DateTime<Tz>> {
 
 /// Advance a `DateTime<Tz>` by one recurrence step.
 ///
-/// `intended_time` is the original start's wall-clock time, used instead of
-/// `current.time()` to prevent time-drift after DST gap resolution.
-/// (e.g. a 2:30 AM event shifted to 3:30 AM on DST day returns to
-/// 2:30 AM the next day.)
+/// `intended_time` is the original start's wall-clock time. For
+/// calendar-aligned frequencies (`Daily`–`Yearly`) it prevents wall-clock
+/// drift after DST gap resolution (e.g. 2:30 AM shifted to 3:30 AM on
+/// spring-forward day returns to 2:30 AM the following day). Sub-daily
+/// frequencies ignore this parameter and always advance from `current`
+/// using a fixed UTC duration.
 ///
-/// Supported frequencies:
+/// ## All seven RFC 5545 frequencies are supported
 ///
-/// - [`Frequency::Daily`] — adds `interval` calendar days via local date
-///   arithmetic, preserving wall-clock time across DST transitions
-/// - [`Frequency::Weekly`] — adds `interval × 7` calendar days (same approach)
+/// **Sub-daily** (advance by fixed UTC duration — DST-transparent):
+/// - [`Frequency::Secondly`] — adds `interval` seconds
+/// - [`Frequency::Minutely`] — adds `interval` minutes
+/// - [`Frequency::Hourly`]   — adds `interval` hours
+///
+/// **Calendar-aligned** (local-date arithmetic + DST resolution):
+/// - [`Frequency::Daily`]   — adds `interval` calendar days
+/// - [`Frequency::Weekly`]  — adds `interval × 7` calendar days
 /// - [`Frequency::Monthly`] — adds `interval` months, clamping to the last
-///   valid day if the target month is shorter (e.g. Jan 31 → Feb 28)
-/// - [`Frequency::Yearly`] — adds `interval` years, clamping for leap-day
-///   dates (e.g. Feb 29 → Feb 28 in non-leap years)
-///
-/// Other variants (`Secondly`, `Minutely`, `Hourly`) are **not supported**
-/// and will return `None`, causing the iterator to terminate after the
-/// first occurrence.
+///   valid day (e.g. Jan 31 → Feb 28)
+/// - [`Frequency::Yearly`]  — adds `interval` years, clamping for leap days
+///   (e.g. Feb 29 → Feb 28 in non-leap years)
 fn advance_by_frequency(
     current: DateTime<Tz>,
     frequency: Frequency,
@@ -320,7 +393,14 @@ fn advance_by_frequency(
             let naive = chrono::NaiveDateTime::new(date, intended_time);
             resolve_local(tz, naive)
         }
-        _ => None,
+        // Sub-daily: advance by a fixed UTC duration ("same elapsed time"
+        // semantics, not "same local wall-clock slot").  Adding
+        // chrono::Duration to a DateTime<Tz> always goes through UTC,
+        // so spring-forward / fall-back transitions are handled transparently
+        // without any local-time lookup.
+        Frequency::Hourly => Some(current + chrono::Duration::hours(interval as i64)),
+        Frequency::Minutely => Some(current + chrono::Duration::minutes(interval as i64)),
+        Frequency::Secondly => Some(current + chrono::Duration::seconds(interval as i64)),
     }
 }
 
@@ -626,7 +706,7 @@ mod tests {
         let tz = parse_timezone("UTC").unwrap();
         let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
 
-        let eager: Vec<_> = recurrence.generate_occurrences(start, 10).unwrap();
+        let eager: Vec<_> = recurrence.generate_occurrences(start).unwrap();
         let lazy: Vec<_> = recurrence.occurrences(start).collect();
 
         assert_eq!(eager.len(), lazy.len());
@@ -808,7 +888,7 @@ mod tests {
         assert_eq!(occurrences[0], start);
 
         // Eager: same behavior
-        let eager = recurrence.generate_occurrences(start, 10).unwrap();
+        let eager = recurrence.generate_occurrences(start).unwrap();
         assert_eq!(eager.len(), 1);
     }
 
@@ -850,7 +930,7 @@ mod tests {
         let tz = parse_timezone("UTC").unwrap();
         let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
 
-        let eager = recurrence.generate_occurrences(start, 14).unwrap();
+        let eager = recurrence.generate_occurrences(start).unwrap();
         let lazy: Vec<_> = recurrence.occurrences(start).collect();
 
         assert_eq!(eager.len(), lazy.len());
@@ -895,7 +975,7 @@ mod tests {
         let tz = parse_timezone("UTC").unwrap();
         let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
 
-        let eager = recurrence.generate_occurrences(start, 6).unwrap();
+        let eager = recurrence.generate_occurrences(start).unwrap();
         let lazy: Vec<_> = recurrence.occurrences(start).collect();
 
         assert_eq!(eager.len(), lazy.len());
@@ -1021,12 +1101,91 @@ mod tests {
         let tz = parse_timezone("America/New_York").unwrap();
         let start = crate::timezone::parse_datetime_with_tz("2025-03-07 02:30:00", tz).unwrap();
 
-        let eager = recurrence.generate_occurrences(start, 5).unwrap();
+        let eager = recurrence.generate_occurrences(start).unwrap();
         let lazy: Vec<_> = recurrence.occurrences(start).collect();
 
         assert_eq!(eager.len(), lazy.len());
         for (e, l) in eager.iter().zip(lazy.iter()) {
             assert_eq!(e, l);
         }
+    }
+
+    #[test]
+    fn test_hourly_recurrence() {
+        let tz = parse_timezone("UTC").unwrap();
+        let start =
+            crate::timezone::parse_datetime_with_tz("2025-06-01 08:00:00", tz).unwrap();
+
+        let occs: Vec<_> = Recurrence::hourly().count(4).occurrences(start).collect();
+        assert_eq!(occs.len(), 4);
+        // Each occurrence 1 hour apart
+        for i in 1..occs.len() {
+            assert_eq!(occs[i] - occs[i - 1], chrono::Duration::hours(1));
+        }
+    }
+
+    #[test]
+    fn test_minutely_recurrence() {
+        let tz = parse_timezone("UTC").unwrap();
+        let start =
+            crate::timezone::parse_datetime_with_tz("2025-06-01 09:00:00", tz).unwrap();
+
+        let occs: Vec<_> = Recurrence::minutely().interval(15).count(5).occurrences(start).collect();
+        assert_eq!(occs.len(), 5);
+        for i in 1..occs.len() {
+            assert_eq!(occs[i] - occs[i - 1], chrono::Duration::minutes(15));
+        }
+    }
+
+    #[test]
+    fn test_secondly_recurrence() {
+        let tz = parse_timezone("UTC").unwrap();
+        let start =
+            crate::timezone::parse_datetime_with_tz("2025-06-01 10:00:00", tz).unwrap();
+
+        let occs: Vec<_> = Recurrence::secondly().interval(30).count(6).occurrences(start).collect();
+        assert_eq!(occs.len(), 6);
+        for i in 1..occs.len() {
+            assert_eq!(occs[i] - occs[i - 1], chrono::Duration::seconds(30));
+        }
+    }
+
+    #[test]
+    fn test_hourly_across_dst_spring_forward() {
+        // US spring-forward: 2025-03-09 2:00 AM → 3:00 AM in America/New_York
+        // An hourly series starting at 1:00 AM should smoothly cross the gap
+        // (1:00 → 2:00 doesn't exist locally but is valid UTC → shows as 3:00 EDT)
+        let tz = parse_timezone("America/New_York").unwrap();
+        let start =
+            crate::timezone::parse_datetime_with_tz("2025-03-09 01:00:00", tz).unwrap();
+
+        let occs: Vec<_> = Recurrence::hourly().count(4).occurrences(start).collect();
+        assert_eq!(occs.len(), 4);
+        // Intervals must be exactly 1 hour apart in wall-clock time
+        // (UTC duration arithmetic is always exact)
+        for i in 1..occs.len() {
+            assert_eq!(occs[i] - occs[i - 1], chrono::Duration::hours(1));
+        }
+        // The "2:00 AM" slot is skipped by the clocks — next valid hour is 3:00 AM EDT
+        assert_eq!(occs[1].hour(), 3);
+    }
+
+    #[test]
+    fn test_subdaily_new_constructor() {
+        // Recurrence::new() accepts all RFC 5545 frequencies
+        let _ = Recurrence::new(Frequency::Hourly);
+        let _ = Recurrence::new(Frequency::Minutely);
+        let _ = Recurrence::new(Frequency::Secondly);
+    }
+
+    #[test]
+    fn test_generate_occurrences_capped() {
+        let recurrence = Recurrence::daily().count(30);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+
+        let capped = recurrence.generate_occurrences_capped(start, 5).unwrap();
+        assert_eq!(capped.len(), 5);
+        assert_eq!(capped[0], start);
     }
 }

@@ -20,7 +20,7 @@ proptest! {
         let start = tz.with_ymd_and_hms(start_year, start_month, start_day, hour, minute, 0).unwrap();
 
         let recurrence = Recurrence::daily().count(count);
-        let occurrences = recurrence.generate_occurrences(start, 200).unwrap();
+        let occurrences = recurrence.generate_occurrences(start).unwrap();
 
         // Invariant: Should generate exactly 'count' occurrences
         prop_assert_eq!(occurrences.len(), count as usize);
@@ -46,7 +46,7 @@ proptest! {
         let start = tz.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap();
 
         let recurrence = Recurrence::weekly().interval(interval).count(count);
-        let occurrences = recurrence.generate_occurrences(start, 100).unwrap();
+        let occurrences = recurrence.generate_occurrences(start).unwrap();
 
         // Invariant: Week difference should match interval
         for windows in occurrences.windows(2) {

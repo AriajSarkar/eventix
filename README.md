@@ -10,7 +10,7 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 ## Features
 
 - 🌍 **Timezone-aware events** - Full support for timezones and DST handling using `chrono-tz`
-- 🔄 **Recurrence patterns** - Daily, weekly, monthly, and yearly recurrence with advanced rules
+- 🔄 **Recurrence patterns** - All seven RFC 5545 frequencies (secondly, minutely, hourly, daily, weekly, monthly, yearly) with advanced rules
 - 🚫 **Exception handling** - Skip specific dates, weekends, or custom holiday lists
 - 🚦 **Booking workflow** - Manage event status (`Confirmed`, `Tentative`, `Cancelled`) with smart gap validation
 - 📅 **ICS support** - Import and export events using the iCalendar (`.ics`) format
@@ -35,7 +35,7 @@ Add eventix to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-eventix = "0.3.1"
+eventix = "0.4.0"
 ```
 
 ### Basic Usage
@@ -120,6 +120,41 @@ let event = Event::builder()
     .start("2025-11-01 15:00:00", "America/Los_Angeles")
     .duration(Duration::hours(2))
     .recurrence(Recurrence::monthly().count(12))
+    .build()?;
+```
+
+### Sub-daily Recurrence (Hourly, Minutely, Secondly)
+
+Sub-daily frequencies advance by a fixed UTC duration. This gives **"same elapsed
+time"** semantics — not "same local wall-clock slot." During a DST transition the
+local-time label may shift (e.g. 1:00 AM → 3:00 AM when clocks spring forward)
+but the actual interval between occurrences is always exact.
+
+```rust
+use eventix::{Event, Recurrence};
+
+// Every 4 hours — e.g. 08:00, 12:00, 16:00, 20:00...
+let reminder = Event::builder()
+    .title("Medication Reminder")
+    .start("2025-06-01 08:00:00", "America/New_York")
+    .duration_minutes(5)
+    .recurrence(Recurrence::hourly().interval(4).count(6))
+    .build()?;
+
+// Every 15 minutes — e.g. pomodoro timer
+let pomo = Event::builder()
+    .title("Pomodoro")
+    .start("2025-06-01 09:00:00", "UTC")
+    .duration_minutes(1)
+    .recurrence(Recurrence::minutely().interval(15).count(8))
+    .build()?;
+
+// Every 30 seconds — e.g. health-check ping
+let ping = Event::builder()
+    .title("Health Check")
+    .start("2025-06-01 12:00:00", "UTC")
+    .duration(Duration::seconds(1))
+    .recurrence(Recurrence::secondly().interval(30).count(10))
     .build()?;
 ```
 
