@@ -1113,8 +1113,7 @@ mod tests {
     #[test]
     fn test_hourly_recurrence() {
         let tz = parse_timezone("UTC").unwrap();
-        let start =
-            crate::timezone::parse_datetime_with_tz("2025-06-01 08:00:00", tz).unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-01 08:00:00", tz).unwrap();
 
         let occs: Vec<_> = Recurrence::hourly().count(4).occurrences(start).collect();
         assert_eq!(occs.len(), 4);
@@ -1127,10 +1126,10 @@ mod tests {
     #[test]
     fn test_minutely_recurrence() {
         let tz = parse_timezone("UTC").unwrap();
-        let start =
-            crate::timezone::parse_datetime_with_tz("2025-06-01 09:00:00", tz).unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-01 09:00:00", tz).unwrap();
 
-        let occs: Vec<_> = Recurrence::minutely().interval(15).count(5).occurrences(start).collect();
+        let occs: Vec<_> =
+            Recurrence::minutely().interval(15).count(5).occurrences(start).collect();
         assert_eq!(occs.len(), 5);
         for i in 1..occs.len() {
             assert_eq!(occs[i] - occs[i - 1], chrono::Duration::minutes(15));
@@ -1140,10 +1139,10 @@ mod tests {
     #[test]
     fn test_secondly_recurrence() {
         let tz = parse_timezone("UTC").unwrap();
-        let start =
-            crate::timezone::parse_datetime_with_tz("2025-06-01 10:00:00", tz).unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-01 10:00:00", tz).unwrap();
 
-        let occs: Vec<_> = Recurrence::secondly().interval(30).count(6).occurrences(start).collect();
+        let occs: Vec<_> =
+            Recurrence::secondly().interval(30).count(6).occurrences(start).collect();
         assert_eq!(occs.len(), 6);
         for i in 1..occs.len() {
             assert_eq!(occs[i] - occs[i - 1], chrono::Duration::seconds(30));
@@ -1156,8 +1155,7 @@ mod tests {
         // An hourly series starting at 1:00 AM should smoothly cross the gap
         // (1:00 → 2:00 doesn't exist locally but is valid UTC → shows as 3:00 EDT)
         let tz = parse_timezone("America/New_York").unwrap();
-        let start =
-            crate::timezone::parse_datetime_with_tz("2025-03-09 01:00:00", tz).unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-03-09 01:00:00", tz).unwrap();
 
         let occs: Vec<_> = Recurrence::hourly().count(4).occurrences(start).collect();
         assert_eq!(occs.len(), 4);

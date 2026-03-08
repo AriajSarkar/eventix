@@ -184,17 +184,13 @@ fn bench_recurrence_generation(c: &mut Criterion) {
 
         // Lazy partial consumption — only take 10%
         let take_count = (*count as usize) / 10;
-        group.bench_with_input(
-            BenchmarkId::new("lazy_take_10pct", count),
-            count,
-            |b, _| {
-                b.iter(|| {
-                    let result: Vec<_> =
-                        recurrence.occurrences(black_box(start)).take(take_count).collect();
-                    result
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("lazy_take_10pct", count), count, |b, _| {
+            b.iter(|| {
+                let result: Vec<_> =
+                    recurrence.occurrences(black_box(start)).take(take_count).collect();
+                result
+            })
+        });
     }
     group.finish();
 }
@@ -268,21 +264,17 @@ fn bench_occurrences_between_capped(c: &mut Criterion) {
             .build()
             .unwrap();
 
-        group.bench_with_input(
-            BenchmarkId::new("secondly_100k_cap", cap),
-            cap,
-            |b, &cap| {
-                b.iter(|| {
-                    event
-                        .occurrences_between(
-                            black_box(window_start),
-                            black_box(window_end),
-                            black_box(cap),
-                        )
-                        .unwrap()
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("secondly_100k_cap", cap), cap, |b, &cap| {
+            b.iter(|| {
+                event
+                    .occurrences_between(
+                        black_box(window_start),
+                        black_box(window_end),
+                        black_box(cap),
+                    )
+                    .unwrap()
+            })
+        });
     }
 
     // Minutely — 100K candidates, cap at 10/100
@@ -295,21 +287,17 @@ fn bench_occurrences_between_capped(c: &mut Criterion) {
             .build()
             .unwrap();
 
-        group.bench_with_input(
-            BenchmarkId::new("minutely_100k_cap", cap),
-            cap,
-            |b, &cap| {
-                b.iter(|| {
-                    event
-                        .occurrences_between(
-                            black_box(window_start),
-                            black_box(window_end),
-                            black_box(cap),
-                        )
-                        .unwrap()
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("minutely_100k_cap", cap), cap, |b, &cap| {
+            b.iter(|| {
+                event
+                    .occurrences_between(
+                        black_box(window_start),
+                        black_box(window_end),
+                        black_box(cap),
+                    )
+                    .unwrap()
+            })
+        });
     }
 
     // Hourly with weekend filter — 50K candidates, cap at 20
@@ -348,19 +336,13 @@ fn bench_occurrences_between_capped(c: &mut Criterion) {
             .unwrap();
 
         let ny_tz = timezone::parse_timezone("America/New_York").unwrap();
-        let year_start =
-            timezone::parse_datetime_with_tz("2025-01-01 00:00:00", ny_tz).unwrap();
-        let year_end =
-            timezone::parse_datetime_with_tz("2025-12-31 23:59:59", ny_tz).unwrap();
+        let year_start = timezone::parse_datetime_with_tz("2025-01-01 00:00:00", ny_tz).unwrap();
+        let year_end = timezone::parse_datetime_with_tz("2025-12-31 23:59:59", ny_tz).unwrap();
 
         group.bench_function("daily_365_skip_weekends_cap50", |b| {
             b.iter(|| {
                 event
-                    .occurrences_between(
-                        black_box(year_start),
-                        black_box(year_end),
-                        black_box(50),
-                    )
+                    .occurrences_between(black_box(year_start), black_box(year_end), black_box(50))
                     .unwrap()
             })
         });
@@ -535,10 +517,7 @@ fn bench_dst_recurrence(c: &mut Criterion) {
         for tz_name in timezones.iter() {
             let event = Event::builder()
                 .title(format!("Regional Standup {}", tz_name))
-                .start(
-                    "2025-01-06 09:00:00",
-                    tz_name,
-                )
+                .start("2025-01-06 09:00:00", tz_name)
                 .duration_minutes(30)
                 .recurrence(Recurrence::daily().count(260)) // ~1 year of weekdays
                 .skip_weekends(true)

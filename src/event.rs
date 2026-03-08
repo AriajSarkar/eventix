@@ -144,9 +144,7 @@ impl Event {
             }
         }
         // Exception dates
-        self.exdates
-            .iter()
-            .any(|exdate| exdate.date_naive() == dt.date_naive())
+        self.exdates.iter().any(|exdate| exdate.date_naive() == dt.date_naive())
     }
 
     /// Check if this event occurs on a specific date
