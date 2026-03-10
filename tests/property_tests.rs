@@ -217,20 +217,14 @@ proptest! {
         let end = base + Duration::hours(num_events as i64 * 3 + 2);
         let gaps = gap_validation::find_gaps(&cal, start, end, Duration::minutes(0)).unwrap();
 
-        // Verify gaps don't overlap
-        for i in 0..gaps.len() {
-            for j in (i + 1)..gaps.len() {
-                let gap_a = &gaps[i];
-                let gap_b = &gaps[j];
-
-                // Gaps should not overlap (one should end before other starts)
-                let overlaps = gap_a.start < gap_b.end && gap_b.start < gap_a.end;
-                prop_assert!(
-                    !overlaps,
-                    "Gap {} ({} - {}) overlaps with Gap {} ({} - {})",
-                    i, gap_a.start, gap_a.end, j, gap_b.start, gap_b.end
-                );
-            }
+        // Verify gaps don't overlap — O(N) adjacent sweep
+        // (find_gaps returns gaps in chronological order)
+        for pair in gaps.windows(2) {
+            prop_assert!(
+                pair[0].end <= pair[1].start,
+                "Gap ({} - {}) overlaps with next gap ({} - {})",
+                pair[0].start, pair[0].end, pair[1].start, pair[1].end
+            );
         }
     }
 

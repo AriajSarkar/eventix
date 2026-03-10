@@ -233,7 +233,9 @@ impl Recurrence {
         }
 
         if let Some(until) = self.until {
-            let until_str = until.format("%Y%m%dT%H%M%SZ").to_string();
+            // RFC 5545: UNTIL with Z suffix must be in UTC
+            let until_utc = until.with_timezone(&chrono::Utc);
+            let until_str = until_utc.format("%Y%m%dT%H%M%SZ").to_string();
             rrule_str.push_str(&format!(";UNTIL={}", until_str));
         }
 
@@ -451,8 +453,12 @@ fn advance_weekly_weekday(
 
     // No more matching weekdays this week — jump to the next week period.
     // Find the Monday of the current week, then advance by interval weeks.
+    // Treat interval == 0 the same as 1 to guarantee forward progress;
+    // otherwise next_week_start stays in the current week and the iterator
+    // can oscillate between weekdays indefinitely.
+    let effective_interval = if interval == 0 { 1u64 } else { interval as u64 };
     let week_start = date - chrono::Days::new(current_dow as u64);
-    let next_week_start = week_start + chrono::Days::new(interval as u64 * 7);
+    let next_week_start = week_start + chrono::Days::new(effective_interval * 7);
 
     for day_offset in 0u64..7 {
         let candidate = next_week_start + chrono::Days::new(day_offset);
@@ -893,6 +899,25 @@ mod tests {
     }
 
     #[test]
+    fn test_zero_interval_weekly_weekdays_does_not_loop() {
+        // interval(0) on weekly + weekdays should not oscillate forever
+        let recurrence = Recurrence::weekly()
+            .interval(0)
+            .weekdays(vec![chrono::Weekday::Mon, chrono::Weekday::Wed])
+            .count(5);
+        let tz = parse_timezone("UTC").unwrap();
+        // Start on a Monday
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        // Must yield exactly 5 and always move forward
+        assert_eq!(occurrences.len(), 5);
+        for pair in occurrences.windows(2) {
+            assert!(pair[1] > pair[0], "occurrence went backwards: {} -> {}", pair[0], pair[1]);
+        }
+    }
+
+    #[test]
     fn test_weekdays_filter_lazy() {
         use rrule::Weekday;
         // Daily recurrence on Mon/Wed/Fri with count=14
@@ -1185,5 +1210,22 @@ mod tests {
         let capped = recurrence.generate_occurrences_capped(start, 5).unwrap();
         assert_eq!(capped.len(), 5);
         assert_eq!(capped[0], start);
+    }
+
+    #[test]
+    fn test_until_rrule_string_uses_utc() {
+        let tz = parse_timezone("America/New_York").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-01 10:00:00", tz).unwrap();
+        let until = crate::timezone::parse_datetime_with_tz("2025-06-30 10:00:00", tz).unwrap();
+
+        let recurrence = Recurrence::daily().until(until);
+        let rrule_str = recurrence.to_rrule_string(start).unwrap();
+
+        // UNTIL must be in UTC (EDT = UTC-4, so 10:00 EDT = 14:00 UTC)
+        assert!(
+            rrule_str.contains("UNTIL=20250630T140000Z"),
+            "UNTIL should be converted to UTC, got: {}",
+            rrule_str
+        );
     }
 }

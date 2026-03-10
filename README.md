@@ -82,13 +82,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Daily Recurrence with Exceptions
 
 ```rust
-use eventix::{Event, Recurrence, timezone};
-
+use eventix::{Duration, Event, Recurrence, timezone};
 let tz = timezone::parse_timezone("America/New_York")?;
 let holiday = timezone::parse_datetime_with_tz("2025-11-27 09:00:00", tz)?;
 
-let event = Event::builder()
-    .title("Morning Standup")
+use eventix::{Duration, Event, Recurrence};    .title("Morning Standup")
     .start("2025-11-01 09:00:00", "America/New_York")
     .duration(Duration::minutes(15))
     .recurrence(Recurrence::daily().count(30))
@@ -100,8 +98,7 @@ let event = Event::builder()
 ### Weekly Recurrence
 
 ```rust
-use eventix::{Event, Recurrence};
-
+use eventix::{Duration, Event, Recurrence};
 let event = Event::builder()
     .title("Weekly Team Meeting")
     .start("2025-11-03 14:00:00", "UTC")
@@ -133,11 +130,13 @@ but the actual interval between occurrences is always exact.
 ```rust
 use eventix::{Event, Recurrence};
 
+use eventix::{Duration, Event, Recurrence};
+
 // Every 4 hours — e.g. 08:00, 12:00, 16:00, 20:00...
 let reminder = Event::builder()
     .title("Medication Reminder")
     .start("2025-06-01 08:00:00", "America/New_York")
-    .duration_minutes(5)
+    .duration(Duration::minutes(5))
     .recurrence(Recurrence::hourly().interval(4).count(6))
     .build()?;
 
@@ -145,7 +144,7 @@ let reminder = Event::builder()
 let pomo = Event::builder()
     .title("Pomodoro")
     .start("2025-06-01 09:00:00", "UTC")
-    .duration_minutes(1)
+    .duration(Duration::minutes(1))
     .recurrence(Recurrence::minutely().interval(15).count(8))
     .build()?;
 
@@ -156,13 +155,8 @@ let ping = Event::builder()
     .duration(Duration::seconds(1))
     .recurrence(Recurrence::secondly().interval(30).count(10))
     .build()?;
-```
-
-### Booking Workflow
-
 ```rust
-use eventix::{Event, EventStatus};
-
+use eventix::{Duration, Event, EventStatus};
 let mut event = Event::builder()
     .title("Tentative Meeting")
     .start("2025-11-01 10:00:00", "UTC")
