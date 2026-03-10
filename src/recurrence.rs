@@ -923,8 +923,7 @@ mod tests {
             .count(5);
         let tz = parse_timezone("UTC").unwrap();
         // Start on a Monday
-        let start =
-            crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
 
         let occurrences: Vec<_> = recurrence.occurrences(start).collect();
         // interval(0) yields only the start (if on a valid weekday), then stops
@@ -1248,8 +1247,7 @@ mod tests {
     fn test_generate_occurrences_rejects_unbounded() {
         let recurrence = Recurrence::daily(); // no count, no until
         let tz = parse_timezone("UTC").unwrap();
-        let start =
-            crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
 
         let result = recurrence.generate_occurrences(start);
         assert!(result.is_err(), "unbounded recurrence should be rejected");
