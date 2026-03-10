@@ -261,7 +261,7 @@ impl Recurrence {
     /// [`generate_occurrences_capped()`](Self::generate_occurrences_capped).
     ///
     /// # Errors
-    /// Returns [`EventixError::RecurrenceError`] if the recurrence has neither
+    /// Returns [`crate::error::EventixError::RecurrenceError`] if the recurrence has neither
     /// `count` nor `until` set, since collecting an unbounded iterator would
     /// hang or exhaust memory.
     pub fn generate_occurrences(&self, start: DateTime<Tz>) -> Result<Vec<DateTime<Tz>>> {
