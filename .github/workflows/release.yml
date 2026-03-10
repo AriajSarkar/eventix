@@ -95,7 +95,7 @@ jobs:
 
       - name: Persist README version on main
         id: sync_readme_main
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && steps.prepare_readme.outputs.changed == 'true'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: |
           set -euo pipefail
           VERSION="${{ steps.release_meta.outputs.version }}"

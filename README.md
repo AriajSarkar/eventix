@@ -4,7 +4,7 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 
 [![Crates.io](https://img.shields.io/crates/v/eventix.svg)](https://crates.io/crates/eventix)
 [![Documentation](https://docs.rs/eventix/badge.svg)](https://docs.rs/eventix)
-[![CI](https://github.com/AriajSarkar/eventix/workflows/Rust%20CI/badge.svg)](https://github.com/AriajSarkar/eventix/actions)
+[![CI](https://github.com/AriajSarkar/eventix/workflows/EventixCI/badge.svg)](https://github.com/AriajSarkar/eventix/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
 ## Features
@@ -86,7 +86,8 @@ use eventix::{Duration, Event, Recurrence, timezone};
 let tz = timezone::parse_timezone("America/New_York")?;
 let holiday = timezone::parse_datetime_with_tz("2025-11-27 09:00:00", tz)?;
 
-use eventix::{Duration, Event, Recurrence};    .title("Morning Standup")
+let event = Event::builder()
+    .title("Morning Standup")
     .start("2025-11-01 09:00:00", "America/New_York")
     .duration(Duration::minutes(15))
     .recurrence(Recurrence::daily().count(30))
@@ -128,8 +129,6 @@ local-time label may shift (e.g. 1:00 AM → 3:00 AM when clocks spring forward)
 but the actual interval between occurrences is always exact.
 
 ```rust
-use eventix::{Event, Recurrence};
-
 use eventix::{Duration, Event, Recurrence};
 
 // Every 4 hours — e.g. 08:00, 12:00, 16:00, 20:00...
@@ -155,6 +154,10 @@ let ping = Event::builder()
     .duration(Duration::seconds(1))
     .recurrence(Recurrence::secondly().interval(30).count(10))
     .build()?;
+```
+
+### Booking Status
+
 ```rust
 use eventix::{Duration, Event, EventStatus};
 let mut event = Event::builder()

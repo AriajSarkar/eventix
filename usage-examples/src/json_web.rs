@@ -71,7 +71,8 @@ pub fn run() -> eventix::Result<()> {
     let response = api_response(&cal);
     println!(
         "\n🌐 API Response:\n{}",
-        serde_json::to_string_pretty(&response).unwrap()
+        serde_json::to_string_pretty(&response)
+            .map_err(|e| eventix::EventixError::Other(e.to_string()))?
     );
 
     // 5. Save to file (with proper error handling)
