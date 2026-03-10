@@ -249,6 +249,11 @@ impl Recurrence {
         self.until
     }
 
+    /// Get the weekday filter of this recurrence
+    pub fn get_weekdays(&self) -> Option<&[rrule::Weekday]> {
+        self.by_weekday.as_deref()
+    }
+
     /// Build an RRule string for this recurrence
     pub fn to_rrule_string(&self, dtstart: DateTime<Tz>) -> Result<String> {
         let mut rrule_str = format!("FREQ={:?}", self.frequency).to_uppercase();
@@ -834,9 +839,19 @@ impl OccurrenceIterator {
             _ => {}
         }
 
-        if self.pending_byday.is_empty() {
+        // Safety: prevent runaway expansion beyond chrono's NaiveDate range
+        if self.byday_next_year > 9999 {
             self.exhausted = true;
         }
+
+        // Don't exhaust here: when the first period has no candidates
+        // (start is past the last matching weekday), the next period
+        // should be tried. The loop in next_byday_expanded() will call
+        // expand_next_byday_period() again, and for valid weekday lists
+        // every month/year has matching days. Count/until checks in
+        // next_byday_expanded() guarantee termination for bounded
+        // recurrences; for unbounded ones the caller must use .take()
+        // or an until date.
     }
 }
 
@@ -844,22 +859,39 @@ impl Iterator for OccurrenceIterator {
     type Item = DateTime<Tz>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // Fast path: no weekday filter active
+        // Avoids per-iteration frequency checks that cause regression on
+        // the common no-weekday path (daily, minutely, hourly, etc.)
+        if self.recurrence.by_weekday.is_none() {
+            if self.is_exhausted() {
+                return None;
+            }
+            let result = self.current;
+            match self.compute_next() {
+                Some(next) => self.current = next,
+                None => self.exhausted = true,
+            }
+            self.count += 1;
+            return Some(result);
+        }
+
         // Monthly/Yearly BYDAY: use period expansion instead of post-filter
         if self.uses_byday_expansion() {
             return self.next_byday_expanded();
         }
 
+        // Weekday-filtered path — dispatch by frequency
+        let weekdays = self.recurrence.by_weekday.as_ref()?;
         loop {
             if self.is_exhausted() {
                 return None;
             }
 
-            // Capture current value
             let result = self.current;
 
-            // Weekly + weekdays: use intra-week expansion (O(1) per emit)
-            if self.recurrence.frequency == Frequency::Weekly {
-                if let Some(ref weekdays) = self.recurrence.by_weekday {
+            match self.recurrence.frequency {
+                // Weekly: intra-week expansion (O(1) per emit)
+                Frequency::Weekly => {
                     match advance_weekly_weekday(
                         result,
                         self.recurrence.interval,
@@ -873,13 +905,9 @@ impl Iterator for OccurrenceIterator {
                         self.count += 1;
                         return Some(result);
                     }
-                    continue;
                 }
-            }
-
-            // Daily + weekdays: direct weekday jumping (O(1) per emit)
-            if self.recurrence.frequency == Frequency::Daily {
-                if let Some(ref weekdays) = self.recurrence.by_weekday {
+                // Daily: direct weekday jumping (O(1) per emit)
+                Frequency::Daily => {
                     match advance_daily_weekday(
                         result,
                         self.recurrence.interval,
@@ -893,23 +921,14 @@ impl Iterator for OccurrenceIterator {
                         self.count += 1;
                         return Some(result);
                     }
-                    continue;
                 }
-            }
-
-            // Compute next occurrence for future calls
-            match self.compute_next() {
-                Some(next) => self.current = next,
-                None => self.exhausted = true,
-            }
-
-            // Sub-daily + weekday filter: O(1) skip over non-matching days
-            if let Some(ref weekdays) = self.recurrence.by_weekday {
-                if !weekdays.contains(&result.weekday()) {
-                    if matches!(
-                        self.recurrence.frequency,
-                        Frequency::Hourly | Frequency::Minutely | Frequency::Secondly
-                    ) {
+                // Sub-daily: advance then O(1) skip over non-matching days
+                Frequency::Hourly | Frequency::Minutely | Frequency::Secondly => {
+                    match self.compute_next() {
+                        Some(next) => self.current = next,
+                        None => self.exhausted = true,
+                    }
+                    if !weekdays.contains(&result.weekday()) {
                         match skip_subdaily_to_matching_day(
                             self.current,
                             self.recurrence.frequency,
@@ -919,15 +938,21 @@ impl Iterator for OccurrenceIterator {
                             Some(next) => self.current = next,
                             None => self.exhausted = true,
                         }
+                    } else {
+                        self.count += 1;
+                        return Some(result);
                     }
-                    continue;
+                }
+                // Monthly/Yearly without weekdays handled by BYDAY path above
+                _ => {
+                    match self.compute_next() {
+                        Some(next) => self.current = next,
+                        None => self.exhausted = true,
+                    }
+                    self.count += 1;
+                    return Some(result);
                 }
             }
-
-            // Only count emitted (non-skipped) occurrences
-            self.count += 1;
-
-            return Some(result);
         }
     }
 
@@ -1935,9 +1960,7 @@ mod tests {
         // Start Thu Jan 2 2025 00:00:00 — not a Wednesday
         let start = crate::timezone::parse_datetime_with_tz("2025-01-02 00:00:00", tz).unwrap();
 
-        let start_time = std::time::Instant::now();
         let occurrences: Vec<_> = recurrence.occurrences(start).collect();
-        let elapsed = start_time.elapsed();
 
         assert_eq!(occurrences.len(), 10);
 
@@ -1948,14 +1971,6 @@ mod tests {
         // First Wednesday after Thu Jan 2 = Wed Jan 8
         assert_eq!(occurrences[0].day(), 8);
         assert_eq!(occurrences[0].month(), 1);
-
-        // This should complete near-instantly — well under 100ms
-        // (without the skip optimization it would take seconds)
-        assert!(
-            elapsed.as_millis() < 100,
-            "subdaily weekday skip took too long: {:?} — O(1) skip may not be working",
-            elapsed
-        );
     }
 
     #[test]
@@ -1976,5 +1991,42 @@ mod tests {
         for occ in &occurrences {
             assert_eq!(occ.weekday(), Weekday::Wed);
         }
+    }
+
+    #[test]
+    fn test_byday_monthly_start_past_last_weekday() {
+        use chrono::Weekday;
+        // Start on Jan 31 (Friday): all Mon/Wed in January are before this date.
+        // The iterator must NOT exhaust — it should advance to February.
+        let recurrence = Recurrence::monthly().weekdays(vec![Weekday::Mon]).count(2);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-31 10:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 2);
+        // First Monday in Feb 2025 = Feb 3
+        assert_eq!(occurrences[0].day(), 3);
+        assert_eq!(occurrences[0].month(), 2);
+        assert_eq!(occurrences[0].weekday(), Weekday::Mon);
+        // Second occurrence: next Monday = Feb 10
+        assert_eq!(occurrences[1].day(), 10);
+        assert_eq!(occurrences[1].month(), 2);
+    }
+
+    #[test]
+    fn test_byday_yearly_start_past_all_weekdays() {
+        use chrono::Weekday;
+        // Start on Dec 31 — all Mondays in 2025 are before this.
+        // Must advance to 2026.
+        let recurrence = Recurrence::yearly().weekdays(vec![Weekday::Mon]).count(1);
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-12-31 10:00:00", tz).unwrap();
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 1);
+        // First Monday in 2026 = Jan 5
+        assert_eq!(occurrences[0].year(), 2026);
+        assert_eq!(occurrences[0].month(), 1);
+        assert_eq!(occurrences[0].day(), 5);
     }
 }

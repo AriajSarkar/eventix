@@ -25,8 +25,8 @@ jobs:
       - name: Run all tests
         run: |
           set -euo pipefail
-          cargo test --all-features --verbose
-          cargo clippy --all-features -- -D warnings
+          cargo test --all-features --all-targets --verbose
+          cargo clippy --all-features --all-targets -- -D warnings
           cargo fmt -- --check
 
       - name: Build documentation
@@ -103,6 +103,9 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
+          # Discard pre-publish README edit before switching branches
+          git checkout -- README.md
+
           git checkout main
           git pull origin main --rebase
 
@@ -138,12 +141,20 @@ jobs:
           
           # Attempt cherry-pick
           echo "🍒 Cherry-picking commit $COMMIT_SHA..."
-          if git cherry-pick "$COMMIT_SHA"; then
+          if git cherry-pick "$COMMIT_SHA" 2>&1; then
             git push origin dev
             echo "✅ SUCCESS: Cherry-picked and pushed README update to dev"
           else
-            # Cherry-pick failed (likely conflict)
-            echo "⚠️ Cherry-pick failed, checking for conflict..."
+            PICK_EXIT=$?
+            # Check if cherry-pick produced an empty commit (change already present)
+            if git diff --cached --quiet 2>/dev/null; then
+              echo "ℹ️ Cherry-pick is empty — change already present on dev"
+              git cherry-pick --abort 2>/dev/null || true
+              exit 0
+            fi
+
+            # Real conflict
+            echo "⚠️ Cherry-pick failed with exit code $PICK_EXIT"
             
             # Abort the failed cherry-pick
             git cherry-pick --abort 2>/dev/null || true

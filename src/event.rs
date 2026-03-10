@@ -143,8 +143,10 @@ impl Event {
                 return true;
             }
         }
-        // Exception dates
-        self.exdates.iter().any(|exdate| exdate.date_naive() == dt.date_naive())
+        // Exception dates — match at full DateTime precision (RFC 5545).
+        // For sub-daily recurrence this skips only the targeted occurrence,
+        // not the entire day.
+        self.exdates.contains(dt)
     }
 
     /// Check if this event occurs on a specific date
@@ -241,6 +243,8 @@ pub struct EventBuilder {
     location: Option<String>,
     uid: Option<String>,
     status: EventStatus,
+    /// First parsing error encountered during builder chain
+    parse_error: Option<EventixError>,
 }
 
 impl EventBuilder {
@@ -259,6 +263,7 @@ impl EventBuilder {
             location: None,
             uid: None,
             status: EventStatus::default(),
+            parse_error: None,
         }
     }
 
@@ -289,10 +294,22 @@ impl EventBuilder {
     ///     .unwrap();
     /// ```
     pub fn start(mut self, datetime: &str, timezone: &str) -> Self {
-        if let Ok(tz) = parse_timezone(timezone) {
-            self.timezone = Some(tz);
-            if let Ok(dt) = parse_datetime_with_tz(datetime, tz) {
-                self.start_time = Some(dt);
+        match parse_timezone(timezone) {
+            Ok(tz) => {
+                self.timezone = Some(tz);
+                match parse_datetime_with_tz(datetime, tz) {
+                    Ok(dt) => self.start_time = Some(dt),
+                    Err(e) => {
+                        if self.parse_error.is_none() {
+                            self.parse_error = Some(e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                if self.parse_error.is_none() {
+                    self.parse_error = Some(e);
+                }
             }
         }
         self
@@ -308,9 +325,18 @@ impl EventBuilder {
     /// Set the end time using a string
     pub fn end(mut self, datetime: &str) -> Self {
         if let Some(tz) = self.timezone {
-            if let Ok(dt) = parse_datetime_with_tz(datetime, tz) {
-                self.end_time = Some(dt);
+            match parse_datetime_with_tz(datetime, tz) {
+                Ok(dt) => self.end_time = Some(dt),
+                Err(e) => {
+                    if self.parse_error.is_none() {
+                        self.parse_error = Some(e);
+                    }
+                }
             }
+        } else if self.parse_error.is_none() {
+            self.parse_error = Some(EventixError::ValidationError(
+                "Cannot set end time: start() with timezone must be called first".to_string(),
+            ));
         }
         self
     }
@@ -402,6 +428,11 @@ impl EventBuilder {
 
     /// Build the event
     pub fn build(self) -> Result<Event> {
+        // Surface any parsing error captured during the builder chain
+        if let Some(err) = self.parse_error {
+            return Err(err);
+        }
+
         let title = self
             .title
             .ok_or_else(|| EventixError::ValidationError("Event title is required".to_string()))?;
@@ -653,5 +684,66 @@ mod tests {
 
         let occs = event.occurrences_between(start, end, 0).unwrap();
         assert!(occs.is_empty());
+    }
+
+    #[test]
+    fn test_builder_surfaces_invalid_timezone() {
+        let result = Event::builder()
+            .title("Bad TZ")
+            .start("2025-01-01 10:00:00", "Invalid/Zone")
+            .duration_hours(1)
+            .build();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        // Should surface the real timezone error, not "Start time is required"
+        assert!(!err.contains("required"), "Expected timezone parse error, got: {}", err);
+    }
+
+    #[test]
+    fn test_builder_surfaces_invalid_datetime() {
+        let result = Event::builder()
+            .title("Bad DT")
+            .start("not-a-date", "UTC")
+            .duration_hours(1)
+            .build();
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(!err.contains("required"), "Expected datetime parse error, got: {}", err);
+    }
+
+    #[test]
+    fn test_exdate_precision_subdaily() {
+        use crate::timezone::parse_timezone;
+        use crate::Recurrence;
+        use chrono::Timelike;
+
+        let tz = parse_timezone("UTC").unwrap();
+
+        // Hourly event with exdate at exactly 12:00
+        let exdate = crate::timezone::parse_datetime_with_tz("2025-06-01 12:00:00", tz).unwrap();
+        let event = Event::builder()
+            .title("Hourly")
+            .start("2025-06-01 10:00:00", "UTC")
+            .duration_minutes(5)
+            .recurrence(Recurrence::hourly().count(5))
+            .exception_date(exdate)
+            .build()
+            .unwrap();
+
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-01 00:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2025-06-02 00:00:00", tz).unwrap();
+
+        let occs = event.occurrences_between(start, end, 100).unwrap();
+        // Should have 4 occurrences (10:00, 11:00, 13:00, 14:00) — 12:00 excluded
+        assert_eq!(
+            occs.len(),
+            4,
+            "exdate should skip only the 12:00 occurrence, got: {:?}",
+            occs.iter().map(|d| d.format("%H:%M").to_string()).collect::<Vec<_>>()
+        );
+        // Verify 12:00 is not in the list
+        for occ in &occs {
+            assert_ne!(occ.hour(), 12, "12:00 should be excluded");
+        }
     }
 }

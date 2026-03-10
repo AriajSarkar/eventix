@@ -2,8 +2,10 @@
 
 use crate::error::{EventixError, Result};
 use crate::event::Event;
+use crate::recurrence::Recurrence;
 use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
+use rrule::Frequency;
 
 /// A calendar containing multiple events
 #[derive(Debug, Clone)]
@@ -150,15 +152,32 @@ impl Calendar {
     /// Get all events occurring within a date range
     ///
     /// This expands recurring events into individual occurrences.
+    /// Uses [events_between_capped](Self::events_between_capped) with a
+    /// per-event limit of 100,000 occurrences.
     pub fn events_between(
         &self,
         start: DateTime<Tz>,
         end: DateTime<Tz>,
     ) -> Result<Vec<EventOccurrence<'_>>> {
+        self.events_between_capped(start, end, 100_000)
+    }
+
+    /// Get all events occurring within a date range, with an explicit
+    /// per-event occurrence cap.
+    ///
+    /// `max_per_event` limits how many occurrences each individual event may
+    /// contribute. This prevents dense sub-daily recurrences from causing
+    /// unbounded memory use when querying large time windows.
+    pub fn events_between_capped(
+        &self,
+        start: DateTime<Tz>,
+        end: DateTime<Tz>,
+        max_per_event: usize,
+    ) -> Result<Vec<EventOccurrence<'_>>> {
         let mut occurrences = Vec::new();
 
         for (index, event) in self.events.iter().enumerate() {
-            let event_occurrences = event.occurrences_between(start, end, 1000)?;
+            let event_occurrences = event.occurrences_between(start, end, max_per_event)?;
 
             for occurrence_time in event_occurrences {
                 occurrences.push(EventOccurrence {
@@ -210,22 +229,35 @@ impl Calendar {
     }
 
     /// Export calendar to JSON
+    ///
+    /// Includes recurrence rules and exception dates for full round-trip
+    /// fidelity with [`from_json()`](Self::from_json).
     pub fn to_json(&self) -> Result<String> {
-        // Create a simplified version for JSON serialization
         let json_val = serde_json::json!({
             "name": self.name,
             "description": self.description,
-            "events": self.events.iter().map(|e| serde_json::json!({
-                "title": e.title,
-                "description": e.description,
-                "start_time": e.start_time.to_rfc3339(),
-                "end_time": e.end_time.to_rfc3339(),
-                "timezone": e.timezone.name(),
-                "attendees": e.attendees,
-                "location": e.location,
-                "uid": e.uid,
-                "status": e.status,
-            })).collect::<Vec<_>>(),
+            "events": self.events.iter().map(|e| {
+                let mut ev = serde_json::json!({
+                    "title": e.title,
+                    "description": e.description,
+                    "start_time": e.start_time.to_rfc3339(),
+                    "end_time": e.end_time.to_rfc3339(),
+                    "timezone": e.timezone.name(),
+                    "attendees": e.attendees,
+                    "location": e.location,
+                    "uid": e.uid,
+                    "status": e.status,
+                });
+                if let Some(ref rec) = e.recurrence {
+                    ev["recurrence"] = recurrence_to_json(rec);
+                }
+                if !e.exdates.is_empty() {
+                    ev["exdates"] = serde_json::json!(
+                        e.exdates.iter().map(|d| d.to_rfc3339()).collect::<Vec<_>>()
+                    );
+                }
+                ev
+            }).collect::<Vec<_>>(),
             "timezone": self.timezone.map(|tz| tz.name()),
         });
 
@@ -299,9 +331,24 @@ impl Calendar {
                             arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
                         })
                         .unwrap_or_default(),
-                    recurrence: None,
+                    recurrence: event_val
+                        .get("recurrence")
+                        .and_then(|v| json_to_recurrence(v, tz).ok()),
                     recurrence_filter: None,
-                    exdates: Vec::new(),
+                    exdates: event_val["exdates"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| {
+                                    v.as_str().and_then(|s| {
+                                        chrono::DateTime::parse_from_rfc3339(s)
+                                            .ok()
+                                            .map(|dt| dt.with_timezone(&tz))
+                                    })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                     location: event_val["location"].as_str().map(|s| s.to_string()),
                     uid: event_val["uid"].as_str().map(|s| s.to_string()),
                     status: match event_val.get("status") {
@@ -352,6 +399,94 @@ impl<'a> EventOccurrence<'a> {
     pub fn description(&self) -> Option<&str> {
         self.event.description.as_deref()
     }
+}
+
+/// Serialize a Recurrence to a JSON value
+fn recurrence_to_json(rec: &Recurrence) -> serde_json::Value {
+    let freq_str = match rec.frequency() {
+        Frequency::Secondly => "secondly",
+        Frequency::Minutely => "minutely",
+        Frequency::Hourly => "hourly",
+        Frequency::Daily => "daily",
+        Frequency::Weekly => "weekly",
+        Frequency::Monthly => "monthly",
+        Frequency::Yearly => "yearly",
+    };
+    let mut obj = serde_json::json!({
+        "frequency": freq_str,
+        "interval": rec.get_interval(),
+    });
+    if let Some(c) = rec.get_count() {
+        obj["count"] = serde_json::json!(c);
+    }
+    if let Some(u) = rec.get_until() {
+        obj["until"] = serde_json::json!(u.to_rfc3339());
+    }
+    if let Some(weekdays) = rec.get_weekdays() {
+        let days: Vec<&str> = weekdays
+            .iter()
+            .map(|wd| match *wd {
+                chrono::Weekday::Mon => "MO",
+                chrono::Weekday::Tue => "TU",
+                chrono::Weekday::Wed => "WE",
+                chrono::Weekday::Thu => "TH",
+                chrono::Weekday::Fri => "FR",
+                chrono::Weekday::Sat => "SA",
+                chrono::Weekday::Sun => "SU",
+            })
+            .collect();
+        obj["weekdays"] = serde_json::json!(days);
+    }
+    obj
+}
+
+/// Deserialize a Recurrence from a JSON value
+fn json_to_recurrence(val: &serde_json::Value, tz: Tz) -> crate::error::Result<Recurrence> {
+    let freq_str = val["frequency"]
+        .as_str()
+        .ok_or_else(|| EventixError::Other("Recurrence missing 'frequency'".to_string()))?;
+    let frequency = match freq_str {
+        "secondly" => Frequency::Secondly,
+        "minutely" => Frequency::Minutely,
+        "hourly" => Frequency::Hourly,
+        "daily" => Frequency::Daily,
+        "weekly" => Frequency::Weekly,
+        "monthly" => Frequency::Monthly,
+        "yearly" => Frequency::Yearly,
+        _ => return Err(EventixError::Other(format!("Unknown frequency: {}", freq_str))),
+    };
+    let interval = val["interval"].as_u64().unwrap_or(1) as u16;
+    let mut rec = Recurrence::new(frequency).interval(interval);
+    if let Some(c) = val["count"].as_u64() {
+        rec = rec.count(c as u32);
+    }
+    if let Some(until_str) = val["until"].as_str() {
+        if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(until_str) {
+            rec = rec.until(parsed.with_timezone(&tz));
+        }
+    }
+    if let Some(weekdays_arr) = val["weekdays"].as_array() {
+        let mut weekdays = Vec::new();
+        for wd_val in weekdays_arr {
+            if let Some(wd_str) = wd_val.as_str() {
+                let wd = match wd_str {
+                    "MO" => chrono::Weekday::Mon,
+                    "TU" => chrono::Weekday::Tue,
+                    "WE" => chrono::Weekday::Wed,
+                    "TH" => chrono::Weekday::Thu,
+                    "FR" => chrono::Weekday::Fri,
+                    "SA" => chrono::Weekday::Sat,
+                    "SU" => chrono::Weekday::Sun,
+                    _ => continue,
+                };
+                weekdays.push(wd);
+            }
+        }
+        if !weekdays.is_empty() {
+            rec = rec.weekdays(weekdays);
+        }
+    }
+    Ok(rec)
 }
 
 #[cfg(test)]
@@ -452,5 +587,37 @@ mod tests {
 
         assert_eq!(restored.name, "Test");
         assert_eq!(restored.event_count(), 1);
+    }
+
+    #[test]
+    fn test_json_recurrence_roundtrip() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let exdate = crate::timezone::parse_datetime_with_tz("2025-01-08 09:00:00", tz).unwrap();
+
+        let mut cal = Calendar::new("Recurrence JSON");
+        let event = Event::builder()
+            .title("Daily Standup")
+            .start("2025-01-06 09:00:00", "UTC")
+            .duration_minutes(15)
+            .recurrence(Recurrence::daily().interval(2).count(10))
+            .exception_date(exdate)
+            .build()
+            .unwrap();
+        cal.add_event(event);
+
+        let json = cal.to_json().unwrap();
+        // Verify recurrence and exdates are in the JSON
+        assert!(json.contains("\"frequency\""), "JSON should contain recurrence frequency");
+        assert!(json.contains("\"exdates\""), "JSON should contain exdates");
+
+        let restored = Calendar::from_json(&json).unwrap();
+        assert_eq!(restored.event_count(), 1);
+
+        let ev = &restored.events[0];
+        let rec = ev.recurrence.as_ref().unwrap();
+        assert_eq!(rec.frequency(), rrule::Frequency::Daily);
+        assert_eq!(rec.get_interval(), 2);
+        assert_eq!(rec.get_count(), Some(10));
+        assert_eq!(ev.exdates.len(), 1);
     }
 }

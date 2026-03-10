@@ -156,6 +156,30 @@ let ping = Event::builder()
     .build()?;
 ```
 
+### Lazy Occurrence Iteration
+
+The `OccurrenceIterator` computes each occurrence on demand, making it ideal for
+large or unbounded recurrence patterns. It supports standard iterator combinators
+(`.take()`, `.filter()`, `.collect()`, etc.):
+
+```rust
+use eventix::{Recurrence, timezone};
+
+let tz = timezone::parse_timezone("UTC")?;
+let start = timezone::parse_datetime_with_tz("2025-06-01 10:00:00", tz)?;
+
+let daily = Recurrence::daily().count(365);
+
+// Take only the first 5 occurrences lazily
+let first_five: Vec<_> = daily.occurrences(start).take(5).collect();
+
+// Filter to Mondays only (chrono::Weekday)
+let mondays: Vec<_> = daily.occurrences(start)
+    .filter(|dt| dt.weekday() == chrono::Weekday::Mon)
+    .take(10)
+    .collect();
+```
+
 ### Booking Status
 
 ```rust
