@@ -259,7 +259,20 @@ impl Recurrence {
     /// the lazy [`occurrences()`](Self::occurrences) method instead. If you want
     /// an eager `Vec` with an explicit hard cap, use
     /// [`generate_occurrences_capped()`](Self::generate_occurrences_capped).
+    ///
+    /// # Errors
+    /// Returns [`EventixError::RecurrenceError`] if the recurrence has neither
+    /// `count` nor `until` set, since collecting an unbounded iterator would
+    /// hang or exhaust memory.
     pub fn generate_occurrences(&self, start: DateTime<Tz>) -> Result<Vec<DateTime<Tz>>> {
+        if self.count.is_none() && self.until.is_none() {
+            return Err(crate::error::EventixError::RecurrenceError(
+                "generate_occurrences() requires a bounded recurrence (set count or until). \
+                 Use occurrences() for lazy iteration or generate_occurrences_capped() for \
+                 a hard cap."
+                    .to_string(),
+            ));
+        }
         Ok(self.occurrences(start).collect())
     }
 
@@ -437,6 +450,12 @@ fn advance_weekly_weekday(
     weekdays: &[chrono::Weekday],
     intended_time: chrono::NaiveTime,
 ) -> Option<DateTime<Tz>> {
+    // Match the zero-interval guard in advance_by_frequency(): no further
+    // occurrences when interval == 0.
+    if interval == 0 {
+        return None;
+    }
+
     let tz = current.timezone();
     let date = current.date_naive();
     let current_dow = date.weekday().num_days_from_monday(); // 0=Mon..6=Sun
@@ -453,12 +472,8 @@ fn advance_weekly_weekday(
 
     // No more matching weekdays this week — jump to the next week period.
     // Find the Monday of the current week, then advance by interval weeks.
-    // Treat interval == 0 the same as 1 to guarantee forward progress;
-    // otherwise next_week_start stays in the current week and the iterator
-    // can oscillate between weekdays indefinitely.
-    let effective_interval = if interval == 0 { 1u64 } else { interval as u64 };
     let week_start = date - chrono::Days::new(current_dow as u64);
-    let next_week_start = week_start + chrono::Days::new(effective_interval * 7);
+    let next_week_start = week_start + chrono::Days::new(interval as u64 * 7);
 
     for day_offset in 0u64..7 {
         let candidate = next_week_start + chrono::Days::new(day_offset);
@@ -900,21 +915,21 @@ mod tests {
 
     #[test]
     fn test_zero_interval_weekly_weekdays_does_not_loop() {
-        // interval(0) on weekly + weekdays should not oscillate forever
+        // interval(0) on weekly + weekdays should terminate immediately,
+        // consistent with advance_by_frequency() returning None for interval==0.
         let recurrence = Recurrence::weekly()
             .interval(0)
             .weekdays(vec![chrono::Weekday::Mon, chrono::Weekday::Wed])
             .count(5);
         let tz = parse_timezone("UTC").unwrap();
         // Start on a Monday
-        let start = crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
+        let start =
+            crate::timezone::parse_datetime_with_tz("2025-01-06 09:00:00", tz).unwrap();
 
         let occurrences: Vec<_> = recurrence.occurrences(start).collect();
-        // Must yield exactly 5 and always move forward
-        assert_eq!(occurrences.len(), 5);
-        for pair in occurrences.windows(2) {
-            assert!(pair[1] > pair[0], "occurrence went backwards: {} -> {}", pair[0], pair[1]);
-        }
+        // interval(0) yields only the start (if on a valid weekday), then stops
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0], start);
     }
 
     #[test]
@@ -1227,5 +1242,16 @@ mod tests {
             "UNTIL should be converted to UTC, got: {}",
             rrule_str
         );
+    }
+
+    #[test]
+    fn test_generate_occurrences_rejects_unbounded() {
+        let recurrence = Recurrence::daily(); // no count, no until
+        let tz = parse_timezone("UTC").unwrap();
+        let start =
+            crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+
+        let result = recurrence.generate_occurrences(start);
+        assert!(result.is_err(), "unbounded recurrence should be rejected");
     }
 }
