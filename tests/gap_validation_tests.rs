@@ -426,3 +426,143 @@ fn test_gap_metadata() {
         }
     }
 }
+
+#[test]
+fn test_touching_events_not_overlapping() {
+    // CRITICAL EDGE CASE: Events that share an exact boundary time should NOT overlap.
+    // Event A ends at 10:00, Event B starts at 10:00 = NO OVERLAP
+    let mut cal = Calendar::new("Touching Events");
+
+    // Event A: 09:00 - 10:00
+    cal.add_event(
+        Event::builder()
+            .title("Event A")
+            .start("2025-11-01 09:00:00", "UTC")
+            .duration_hours(1)
+            .build()
+            .unwrap(),
+    );
+
+    // Event B: 10:00 - 11:00 (starts exactly when A ends)
+    cal.add_event(
+        Event::builder()
+            .title("Event B")
+            .start("2025-11-01 10:00:00", "UTC")
+            .duration_hours(1)
+            .build()
+            .unwrap(),
+    );
+
+    // Event C: 11:00 - 12:00 (starts exactly when B ends)
+    cal.add_event(
+        Event::builder()
+            .title("Event C")
+            .start("2025-11-01 11:00:00", "UTC")
+            .duration_hours(1)
+            .build()
+            .unwrap(),
+    );
+
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let start = timezone::parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
+    let end = timezone::parse_datetime_with_tz("2025-11-01 13:00:00", tz).unwrap();
+
+    let overlaps = gap_validation::find_overlaps(&cal, start, end).unwrap();
+
+    // Back-to-back events should have ZERO overlaps
+    assert_eq!(
+        overlaps.len(),
+        0,
+        "Touching events (A ends when B starts) should NOT be detected as overlapping"
+    );
+}
+
+#[test]
+fn test_overlaps_sweep_line_performance() {
+    // Test that sweep line algorithm handles many events efficiently
+    let mut cal = Calendar::new("Many Events");
+
+    // Create 100 events distributed across 28 days at the same time
+    // Multiple events per day will overlap (verifies correct detection at scale)
+    for i in 0..100 {
+        cal.add_event(
+            Event::builder()
+                .title(format!("Event {}", i))
+                .start(&format!("2025-11-{:02} 10:00:00", (i % 28) + 1), "UTC")
+                .duration_hours(1)
+                .build()
+                .unwrap(),
+        );
+    }
+
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let start = timezone::parse_datetime_with_tz("2025-11-01 00:00:00", tz).unwrap();
+    let end = timezone::parse_datetime_with_tz("2025-11-30 23:59:59", tz).unwrap();
+
+    // This should complete quickly with O(N log N) algorithm
+    let overlaps = gap_validation::find_overlaps(&cal, start, end).unwrap();
+
+    // 100 events % 28 days = ~3-4 events per day at same time = overlaps expected
+    assert!(overlaps.len() > 0, "Should detect overlaps on same-day events");
+}
+
+#[test]
+fn test_zero_duration_events_no_false_overlaps() {
+    // EDGE CASE: Zero-duration events (start == end) should not cause false overlaps.
+    // The builder intentionally rejects zero-duration events, but imported/manual data
+    // can still contain them, so find_overlaps must handle them defensively.
+    let cal = Calendar::from_json(
+        r#"
+        {
+            "name": "Zero Duration Test",
+            "events": [
+                {
+                    "title": "Zero Duration Event",
+                    "start_time": "2025-06-15T09:00:00+00:00",
+                    "end_time": "2025-06-15T09:00:00+00:00",
+                    "timezone": "UTC",
+                    "status": "Confirmed",
+                    "attendees": [],
+                    "description": null,
+                    "location": null,
+                    "uid": null
+                },
+                {
+                    "title": "Event A",
+                    "start_time": "2025-06-15T10:00:00+00:00",
+                    "end_time": "2025-06-15T11:00:00+00:00",
+                    "timezone": "UTC",
+                    "status": "Confirmed",
+                    "attendees": [],
+                    "description": null,
+                    "location": null,
+                    "uid": null
+                },
+                {
+                    "title": "Event B",
+                    "start_time": "2025-06-15T12:00:00+00:00",
+                    "end_time": "2025-06-15T13:00:00+00:00",
+                    "timezone": "UTC",
+                    "status": "Confirmed",
+                    "attendees": [],
+                    "description": null,
+                    "location": null,
+                    "uid": null
+                }
+            ],
+            "timezone": "UTC"
+        }
+        "#,
+    )
+    .unwrap();
+
+    let tz = timezone::parse_timezone("UTC").unwrap();
+
+    let start = timezone::parse_datetime_with_tz("2025-06-15 00:00:00", tz).unwrap();
+    let end = timezone::parse_datetime_with_tz("2025-06-15 23:59:59", tz).unwrap();
+
+    let overlaps = gap_validation::find_overlaps(&cal, start, end).unwrap();
+
+    // Zero-duration imported events should be ignored, leaving no false overlaps.
+    assert_eq!(overlaps.len(), 0, "Zero-duration events should not produce false overlaps");
+}

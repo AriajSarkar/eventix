@@ -4,13 +4,13 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 
 [![Crates.io](https://img.shields.io/crates/v/eventix.svg)](https://crates.io/crates/eventix)
 [![Documentation](https://docs.rs/eventix/badge.svg)](https://docs.rs/eventix)
-[![CI](https://github.com/AriajSarkar/eventix/workflows/Rust%20CI/badge.svg)](https://github.com/AriajSarkar/eventix/actions)
+[![CI](https://github.com/AriajSarkar/eventix/workflows/EventixCI/badge.svg)](https://github.com/AriajSarkar/eventix/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
 ## Features
 
 - 🌍 **Timezone-aware events** - Full support for timezones and DST handling using `chrono-tz`
-- 🔄 **Recurrence patterns** - Daily, weekly, monthly, and yearly recurrence with advanced rules
+- 🔄 **Recurrence patterns** - All seven RFC 5545 frequencies (secondly, minutely, hourly, daily, weekly, monthly, yearly) with advanced rules
 - 🚫 **Exception handling** - Skip specific dates, weekends, or custom holiday lists
 - 🚦 **Booking workflow** - Manage event status (`Confirmed`, `Tentative`, `Cancelled`) with smart gap validation
 - 📅 **ICS support** - Import and export events using the iCalendar (`.ics`) format
@@ -35,7 +35,7 @@ Add eventix to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-eventix = "0.3.1"
+eventix = "0.4.0"
 ```
 
 ### Basic Usage
@@ -82,8 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Daily Recurrence with Exceptions
 
 ```rust
-use eventix::{Event, Recurrence, timezone};
-
+use eventix::{Duration, Event, Recurrence, timezone};
 let tz = timezone::parse_timezone("America/New_York")?;
 let holiday = timezone::parse_datetime_with_tz("2025-11-27 09:00:00", tz)?;
 
@@ -100,8 +99,7 @@ let event = Event::builder()
 ### Weekly Recurrence
 
 ```rust
-use eventix::{Event, Recurrence};
-
+use eventix::{Duration, Event, Recurrence};
 let event = Event::builder()
     .title("Weekly Team Meeting")
     .start("2025-11-03 14:00:00", "UTC")
@@ -123,11 +121,69 @@ let event = Event::builder()
     .build()?;
 ```
 
-### Booking Workflow
+### Sub-daily Recurrence (Hourly, Minutely, Secondly)
+
+Sub-daily frequencies advance by a fixed UTC duration. This gives **"same elapsed
+time"** semantics — not "same local wall-clock slot." During a DST transition the
+local-time label may shift (e.g. 1:00 AM → 3:00 AM when clocks spring forward)
+but the actual interval between occurrences is always exact.
 
 ```rust
-use eventix::{Event, EventStatus};
+use eventix::{Duration, Event, Recurrence};
 
+// Every 4 hours — e.g. 08:00, 12:00, 16:00, 20:00...
+let reminder = Event::builder()
+    .title("Medication Reminder")
+    .start("2025-06-01 08:00:00", "America/New_York")
+    .duration(Duration::minutes(5))
+    .recurrence(Recurrence::hourly().interval(4).count(6))
+    .build()?;
+
+// Every 15 minutes — e.g. pomodoro timer
+let pomo = Event::builder()
+    .title("Pomodoro")
+    .start("2025-06-01 09:00:00", "UTC")
+    .duration(Duration::minutes(1))
+    .recurrence(Recurrence::minutely().interval(15).count(8))
+    .build()?;
+
+// Every 30 seconds — e.g. health-check ping
+let ping = Event::builder()
+    .title("Health Check")
+    .start("2025-06-01 12:00:00", "UTC")
+    .duration(Duration::seconds(1))
+    .recurrence(Recurrence::secondly().interval(30).count(10))
+    .build()?;
+```
+
+### Lazy Occurrence Iteration
+
+The `OccurrenceIterator` computes each occurrence on demand, making it ideal for
+large or unbounded recurrence patterns. It supports standard iterator combinators
+(`.take()`, `.filter()`, `.collect()`, etc.):
+
+```rust
+use eventix::{Recurrence, timezone};
+
+let tz = timezone::parse_timezone("UTC")?;
+let start = timezone::parse_datetime_with_tz("2025-06-01 10:00:00", tz)?;
+
+let daily = Recurrence::daily().count(365);
+
+// Take only the first 5 occurrences lazily
+let first_five: Vec<_> = daily.occurrences(start).take(5).collect();
+
+// Filter to Mondays only (chrono::Weekday)
+let mondays: Vec<_> = daily.occurrences(start)
+    .filter(|dt| dt.weekday() == chrono::Weekday::Mon)
+    .take(10)
+    .collect();
+```
+
+### Booking Status
+
+```rust
+use eventix::{Duration, Event, EventStatus};
 let mut event = Event::builder()
     .title("Tentative Meeting")
     .start("2025-11-01 10:00:00", "UTC")

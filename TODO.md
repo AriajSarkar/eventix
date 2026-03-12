@@ -10,9 +10,10 @@ This document outlines the strategic technical direction for the `eventix` crate
     - **Implementation**: strict state transitions (`confirm()`, `cancel()`, `reschedule()`) to ensure data integrity.
     - **Impact**: Enables `gap_validation` to automatically ignore cancelled events, significantly reducing implementation complexity for consumers.
 
-- [ ] **Advanced Recurrence Optimization** `(Priority: Medium)`
-    - **Optimization**: Implement caching or lazy evaluation for infinite recurrence rules (`RRule`).
-    - **Feature**: "Smart" expansion that only computes instances within the relevant view window.
+- [x] **Advanced Recurrence Optimization** `(Priority: Medium)`
+    - **Optimization**: Lazy `OccurrenceIterator` computes occurrences on demand, zero upfront allocation for infinite recurrence rules.
+    - **Feature**: `occurrences_between()` uses windowed expansion (`take_while` + `filter`) to only compute instances within the relevant view window.
+    - **DST safety**: `resolve_local()` handles spring-forward gaps via pre-gap UTC offset; `intended_time` parameter prevents wall-clock drift across DST transitions.
 
 ## 2. API & Integration Ecosystem
 *Objective: Enable seamless integration with modern web stacks and AI agents.*

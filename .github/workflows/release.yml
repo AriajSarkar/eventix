@@ -24,8 +24,9 @@ jobs:
 
       - name: Run all tests
         run: |
-          cargo test --all-features --verbose
-          cargo clippy --all-features -- -D warnings
+          set -euo pipefail
+          cargo test --all-features --all-targets --verbose
+          cargo clippy --all-features --all-targets -- -D warnings
           cargo fmt -- --check
 
       - name: Build documentation
@@ -33,9 +34,48 @@ jobs:
 
       - name: Security audit
         run: |
+          set -euo pipefail
           cargo install cargo-audit
           cargo audit
 
+      - name: Resolve release version
+        id: release_meta
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['package']['version'])")
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+
+          echo "Cargo.toml version: $PACKAGE_VERSION"
+          echo "Git tag version: $TAG_VERSION"
+
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "⚠️ Tag v$TAG_VERSION does not match Cargo.toml version $PACKAGE_VERSION"
+            echo "⚠️ Using Cargo.toml version as the authoritative README/publish version"
+          fi
+
+          echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare README for publish
+        id: prepare_readme
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.release_meta.outputs.version }}"
+          echo "Ensuring README dependency snippets match Cargo.toml version $VERSION"
+
+          sed -i "s/^\([[:space:]]*\)eventix = \".*\"/\1eventix = \"$VERSION\"/" README.md
+
+          if git diff --quiet README.md; then
+            echo "README already matches Cargo.toml version $VERSION"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "README updated in working tree before publish"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff -- README.md
+          fi
+
+      # Publish the tagged source, with README normalized from Cargo.toml just before packaging
       - name: Publish to crates.io
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         env:
@@ -53,41 +93,83 @@ jobs:
             LICENSE-MIT
             LICENSE-APACHE
 
-      - name: Update README version
+      - name: Persist README version on main
+        id: sync_readme_main
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
         run: |
-          # Checkout main branch for updates (release triggered on tag)
-          git checkout main
-          git pull origin main --rebase
-          
-          # Configure Git
+          set -euo pipefail
+          VERSION="${{ steps.release_meta.outputs.version }}"
+
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          
-          # Extract version from tag (e.g., v0.3.0 -> 0.3.0)
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "Updating README to version $VERSION"
-          
-          # Replace 'eventix = "..."' with 'eventix = "$VERSION"', preserving indentation
+
+          # Discard pre-publish README edit before switching branches
+          git checkout -- README.md
+
+          git checkout main
+          git pull origin main --rebase
+
           sed -i "s/^\([[:space:]]*\)eventix = \".*\"/\1eventix = \"$VERSION\"/" README.md
-          
-          # Check for changes
+
           if git diff --quiet README.md; then
-            echo "No changes to README.md"
+            echo "README already up to date on main"
+            echo "commit_sha=" >> "$GITHUB_OUTPUT"
           else
             git commit -am "docs: update readme version to $VERSION [skip ci]"
             git push origin main
-            echo "Pushed README update to main"
+
+            COMMIT_SHA=$(git rev-parse HEAD)
+            echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+            echo "Pushed README update to main ($COMMIT_SHA)"
           fi
 
-      - name: Merge main into dev
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      - name: Sync README update to dev
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && steps.sync_readme_main.outputs.commit_sha != ''
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "Merging main into dev..."
+          set -euo pipefail
+          COMMIT_SHA="${{ steps.sync_readme_main.outputs.commit_sha }}"
+          echo "Syncing README commit $COMMIT_SHA to dev..."
           
           git checkout dev
           git pull origin dev --rebase
-          git merge origin/main -m "merge: sync main to dev after release $VERSION"
-          git push origin dev
-          echo "Merged main into dev"
+          
+          # Check if commit is already on dev
+          if git merge-base --is-ancestor "$COMMIT_SHA" HEAD; then
+            echo "ℹ️ SKIPPED: Commit $COMMIT_SHA is already on dev branch"
+            exit 0
+          fi
+          
+          # Attempt cherry-pick
+          echo "🍒 Cherry-picking commit $COMMIT_SHA..."
+          if git cherry-pick "$COMMIT_SHA" 2>&1; then
+            git push origin dev
+            echo "✅ SUCCESS: Cherry-picked and pushed README update to dev"
+          else
+            PICK_EXIT=$?
+            # Check if cherry-pick produced an empty commit (change already present)
+            if git diff --cached --quiet 2>/dev/null; then
+              echo "ℹ️ Cherry-pick is empty — change already present on dev"
+              git cherry-pick --abort 2>/dev/null || true
+              exit 0
+            fi
+
+            # Real conflict
+            echo "⚠️ Cherry-pick failed with exit code $PICK_EXIT"
+            
+            # Abort the failed cherry-pick
+            git cherry-pick --abort 2>/dev/null || true
+            
+            # Reset to clean state
+            git reset --hard HEAD
+            
+            echo "❌ CONFLICT: Could not cherry-pick README update to dev"
+            echo "   The commit $COMMIT_SHA conflicts with current dev branch."
+            echo "   Manual resolution required:"
+            echo "     git checkout dev"
+            echo "     git cherry-pick $COMMIT_SHA"
+            echo "     # resolve conflicts"
+            echo "     git push origin dev"
+            
+            # Exit with error to make the conflict visible
+            exit 1
+          fi

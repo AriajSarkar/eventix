@@ -1,6 +1,6 @@
 [package]
 name = "eventix"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 authors = ["Raj Sarkar <ariajsarkar@gmail.com>"]
 description = "High-level calendar & recurrence crate with timezone-aware scheduling, exceptions, and ICS import/export"
@@ -10,7 +10,15 @@ readme = "README.md"
 homepage = "https://github.com/AriajSarkar/eventix"
 keywords = ["calendar", "scheduling", "booking", "availability", "ics"]
 categories = ["date-and-time"]
-exclude = ["usage-examples/"]
+exclude = [
+    "usage-examples/",
+    "examples_output/",
+    ".github/",
+    "target/",
+    "TODO.md",
+    "llms.txt",
+    "rustfmt.toml",
+]
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
@@ -18,13 +26,18 @@ chrono-tz = { version = "0.10", features = ["serde"] }
 rrule = "0.14"
 icalendar = "0.17"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2.0"
-uuid = { version = "1.0", features = ["v4"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-anyhow = "1.0"
-proptest = "1.0"
+anyhow = "1"
+proptest = "1.10"
+criterion = { version = "0.8", features = ["html_reports"] }
+
+[[bench]]
+name = "performance"
+harness = false
 
 [lints.clippy]
 unwrap_used = "warn"

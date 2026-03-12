@@ -3,9 +3,11 @@
 use crate::calendar::Calendar;
 use crate::error::{EventixError, Result};
 use crate::event::Event;
+use crate::recurrence::Recurrence;
 use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
 use icalendar::{Calendar as ICalendar, Component, Event as IEvent, EventLike, Property};
+use rrule::Frequency;
 use std::fs;
 use std::path::Path;
 
@@ -173,15 +175,21 @@ fn event_to_ical(event: &Event) -> Result<IEvent> {
         }
     }
 
-    // Add exception dates with timezone
+    // Add exception dates with timezone (EXDATE is a multi-property in RFC 5545)
+    // Normalize each exdate to the event timezone before formatting so the
+    // stamped local time matches the TZID label.
+    let event_tz = event.start_time.timezone();
     for exdate in &event.exdates {
-        let exdate_str = exdate.format("%Y%m%dT%H%M%S").to_string();
         if tz_name == "UTC" {
-            ical_event.add_property("EXDATE", format!("{}Z", exdate_str));
+            let exdate_utc = exdate.with_timezone(&chrono::Utc);
+            let exdate_str = exdate_utc.format("%Y%m%dT%H%M%S").to_string();
+            ical_event.add_multi_property("EXDATE", &format!("{}Z", exdate_str));
         } else {
+            let exdate_local = exdate.with_timezone(&event_tz);
+            let exdate_str = exdate_local.format("%Y%m%dT%H%M%S").to_string();
             let mut exdate_prop = Property::new("EXDATE", &exdate_str);
             exdate_prop.add_parameter("TZID", tz_name);
-            ical_event.append_property(exdate_prop);
+            ical_event.append_multi_property(exdate_prop);
         }
     }
 
@@ -218,10 +226,149 @@ fn ical_to_event(ical_event: &IEvent) -> Result<Event> {
         builder = builder.uid(uid);
     }
 
-    // TODO: Parse RRULE and EXDATE if present
-    // This would require more sophisticated parsing of the iCalendar properties
+    // Parse RRULE if present — reject unsupported rules instead of silently
+    // degrading, since dropping BYMONTH etc. would produce a broader schedule.
+    let props = ical_event.properties();
+    for (key, prop) in props {
+        if key == "RRULE" {
+            let rrule_value = prop.value();
+            let recurrence = parse_rrule_value(rrule_value, start_time)?;
+            builder = builder.recurrence(recurrence);
+        }
+    }
+
+    // Parse EXDATE properties (stored in multi_properties per RFC 5545)
+    let event_tz = start_time.timezone();
+    if let Some(exdate_props) = ical_event.multi_properties().get("EXDATE") {
+        for prop in exdate_props {
+            let value = prop.value();
+            // Determine timezone for this EXDATE
+            let exdate_tz = if let Some(tzid_param) = prop.params().get("TZID") {
+                crate::timezone::parse_timezone(tzid_param.value()).unwrap_or(event_tz)
+            } else if value.ends_with('Z') {
+                crate::timezone::parse_timezone("UTC").unwrap_or(event_tz)
+            } else {
+                event_tz
+            };
+
+            let dt_str = value.trim_end_matches('Z');
+            let exdate_dt = parse_ical_datetime_value(dt_str, exdate_tz).map_err(|e| {
+                EventixError::IcsError(format!("Failed to parse EXDATE '{}': {}", value, e))
+            })?;
+            builder = builder.exception_date(exdate_dt);
+        }
+    }
 
     builder.build()
+}
+
+/// Parse an RRULE value string into a Recurrence.
+///
+/// Supports: FREQ, INTERVAL, COUNT, UNTIL, BYDAY
+fn parse_rrule_value(rrule_str: &str, dtstart: DateTime<Tz>) -> Result<Recurrence> {
+    let mut frequency = None;
+    let mut interval = 1u16;
+    let mut count = None;
+    let mut until = None;
+    let mut by_weekday = None;
+
+    for part in rrule_str.split(';') {
+        let Some((key, value)) = part.split_once('=') else {
+            continue;
+        };
+        match key {
+            "FREQ" => {
+                frequency = Some(match value {
+                    "SECONDLY" => Frequency::Secondly,
+                    "MINUTELY" => Frequency::Minutely,
+                    "HOURLY" => Frequency::Hourly,
+                    "DAILY" => Frequency::Daily,
+                    "WEEKLY" => Frequency::Weekly,
+                    "MONTHLY" => Frequency::Monthly,
+                    "YEARLY" => Frequency::Yearly,
+                    _ => {
+                        return Err(EventixError::IcsError(format!(
+                            "Unknown RRULE frequency: {}",
+                            value
+                        )))
+                    }
+                });
+            }
+            "INTERVAL" => {
+                interval = value.parse().map_err(|_| {
+                    EventixError::IcsError(format!("Invalid RRULE INTERVAL: {}", value))
+                })?;
+            }
+            "COUNT" => {
+                count = Some(value.parse().map_err(|_| {
+                    EventixError::IcsError(format!("Invalid RRULE COUNT: {}", value))
+                })?);
+            }
+            "UNTIL" => {
+                // UNTIL can be a date or datetime, possibly with Z suffix
+                let dt_str = value.trim_end_matches('Z');
+                let tz = if value.ends_with('Z') {
+                    crate::timezone::parse_timezone("UTC")?
+                } else {
+                    dtstart.timezone()
+                };
+                until = Some(parse_ical_datetime_value(dt_str, tz)?);
+            }
+            "BYDAY" => {
+                let mut weekdays = Vec::new();
+                for day_str in value.split(',') {
+                    let day_str = day_str.trim();
+                    let wd = match day_str {
+                        "MO" => chrono::Weekday::Mon,
+                        "TU" => chrono::Weekday::Tue,
+                        "WE" => chrono::Weekday::Wed,
+                        "TH" => chrono::Weekday::Thu,
+                        "FR" => chrono::Weekday::Fri,
+                        "SA" => chrono::Weekday::Sat,
+                        "SU" => chrono::Weekday::Sun,
+                        other => {
+                            return Err(EventixError::IcsError(format!(
+                                "Unsupported BYDAY value '{}' (ordinal prefixes like 1MO or -1FR are not supported)",
+                                other
+                            )))
+                        }
+                    };
+                    weekdays.push(wd);
+                }
+                if !weekdays.is_empty() {
+                    by_weekday = Some(weekdays);
+                }
+            }
+            other => {
+                return Err(EventixError::IcsError(format!(
+                    "Unsupported RRULE component: {}",
+                    other
+                )))
+            }
+        }
+    }
+
+    let freq = frequency
+        .ok_or_else(|| EventixError::IcsError("RRULE missing FREQ component".to_string()))?;
+
+    // RFC 5545 §3.3.10: COUNT and UNTIL MUST NOT both appear in the same rule
+    if count.is_some() && until.is_some() {
+        return Err(EventixError::IcsError(
+            "RRULE must not contain both COUNT and UNTIL".to_string(),
+        ));
+    }
+
+    let mut recurrence = Recurrence::new(freq).interval(interval);
+    if let Some(c) = count {
+        recurrence = recurrence.count(c);
+    }
+    if let Some(u) = until {
+        recurrence = recurrence.until(u);
+    }
+    if let Some(wd) = by_weekday {
+        recurrence = recurrence.weekdays(wd);
+    }
+    Ok(recurrence)
 }
 
 /// Extract datetime with timezone from an iCalendar property
@@ -235,28 +382,7 @@ fn extract_datetime_with_tz(ical_event: &IEvent, prop_name: &str) -> Result<(Dat
 
             // Check if there's a TZID parameter
             let timezone = if let Some(tzid_param) = prop.params().get("TZID") {
-                // Parse the timezone from TZID parameter (use Debug format)
-                // Debug format is: Parameter { key: "TZID", val: "America/New_York" }
-                let tz_str_raw = format!("{:?}", tzid_param);
-                // Extract the value after 'val: "'
-                let tz_str = if let Some(start_idx) = tz_str_raw.find("val: \"") {
-                    let start = start_idx + 6; // Length of 'val: "'
-                    let remaining = &tz_str_raw[start..];
-                    if let Some(end_idx) = remaining.find('"') {
-                        remaining[..end_idx].to_string()
-                    } else {
-                        return Err(EventixError::InvalidTimezone(format!(
-                            "Cannot parse TZID parameter: {}",
-                            tz_str_raw
-                        )));
-                    }
-                } else {
-                    return Err(EventixError::InvalidTimezone(format!(
-                        "Cannot parse TZID parameter: {}",
-                        tz_str_raw
-                    )));
-                };
-                crate::timezone::parse_timezone(&tz_str)?
+                crate::timezone::parse_timezone(tzid_param.value())?
             } else if value.ends_with('Z') {
                 // UTC timezone
                 crate::timezone::parse_timezone("UTC")?
@@ -277,30 +403,47 @@ fn extract_datetime_with_tz(ical_event: &IEvent, prop_name: &str) -> Result<(Dat
 }
 
 /// Parse an iCalendar datetime value string
+///
+/// Accepts both DATE-TIME format (`YYYYMMDDTHHMMSS`, 15+ chars) and
+/// DATE-only format (`YYYYMMDD`, exactly 8 chars). DATE-only values
+/// default to midnight (00:00:00).
 fn parse_ical_datetime_value(dt_str: &str, tz: Tz) -> Result<DateTime<Tz>> {
-    // Format: YYYYMMDDTHHMMSS
-    if dt_str.len() < 15 {
+    // DATE-only format: YYYYMMDD (8 chars, no 'T' separator)
+    let (year, month, day, hour, minute, second) = if dt_str.len() == 8 && !dt_str.contains('T') {
+        let year: i32 = dt_str[0..4]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid year in: {}", dt_str)))?;
+        let month: u32 = dt_str[4..6]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid month in: {}", dt_str)))?;
+        let day: u32 = dt_str[6..8]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid day in: {}", dt_str)))?;
+        (year, month, day, 0, 0, 0)
+    } else if dt_str.len() >= 15 {
+        // DATE-TIME format: YYYYMMDDTHHMMSS
+        let year: i32 = dt_str[0..4]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid year in: {}", dt_str)))?;
+        let month: u32 = dt_str[4..6]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid month in: {}", dt_str)))?;
+        let day: u32 = dt_str[6..8]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid day in: {}", dt_str)))?;
+        let hour: u32 = dt_str[9..11]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid hour in: {}", dt_str)))?;
+        let minute: u32 = dt_str[11..13]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid minute in: {}", dt_str)))?;
+        let second: u32 = dt_str[13..15]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid second in: {}", dt_str)))?;
+        (year, month, day, hour, minute, second)
+    } else {
         return Err(EventixError::DateTimeParse(format!("Invalid datetime format: {}", dt_str)));
-    }
-
-    let year: i32 = dt_str[0..4]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid year in: {}", dt_str)))?;
-    let month: u32 = dt_str[4..6]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid month in: {}", dt_str)))?;
-    let day: u32 = dt_str[6..8]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid day in: {}", dt_str)))?;
-    let hour: u32 = dt_str[9..11]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid hour in: {}", dt_str)))?;
-    let minute: u32 = dt_str[11..13]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid minute in: {}", dt_str)))?;
-    let second: u32 = dt_str[13..15]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid second in: {}", dt_str)))?;
+    };
 
     let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
         .and_then(|d| d.and_hms_opt(hour, minute, second))
@@ -333,5 +476,124 @@ mod tests {
         let ics = cal.to_ics_string().unwrap();
         assert!(ics.contains("Test Calendar"));
         assert!(ics.contains("Test Event"));
+    }
+
+    #[test]
+    fn test_ics_rrule_roundtrip() {
+        let mut cal = Calendar::new("RRULE Test");
+        let event = Event::builder()
+            .title("Daily Standup")
+            .start("2025-01-06 09:00:00", "UTC")
+            .duration_minutes(15)
+            .recurrence(Recurrence::daily().interval(2).count(10))
+            .build()
+            .unwrap();
+
+        cal.add_event(event);
+
+        let ics = cal.to_ics_string().unwrap();
+        assert!(ics.contains("RRULE:"), "exported ICS should contain RRULE");
+
+        // Re-import
+        let imported = Calendar::from_ics_string(&ics).unwrap();
+        assert_eq!(imported.event_count(), 1);
+
+        let imported_event = &imported.events[0];
+        let rec = imported_event.recurrence.as_ref().unwrap();
+        assert_eq!(rec.frequency(), rrule::Frequency::Daily);
+        assert_eq!(rec.get_interval(), 2);
+        assert_eq!(rec.get_count(), Some(10));
+    }
+
+    #[test]
+    fn test_ics_exdate_roundtrip() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let exdate = crate::timezone::parse_datetime_with_tz("2025-01-08 09:00:00", tz).unwrap();
+
+        let mut cal = Calendar::new("EXDATE Test");
+        let event = Event::builder()
+            .title("Recurring")
+            .start("2025-01-06 09:00:00", "UTC")
+            .duration_minutes(15)
+            .recurrence(Recurrence::daily().count(10))
+            .exception_date(exdate)
+            .build()
+            .unwrap();
+
+        cal.add_event(event);
+
+        let ics = cal.to_ics_string().unwrap();
+        assert!(ics.contains("EXDATE"), "exported ICS should contain EXDATE");
+
+        let imported = Calendar::from_ics_string(&ics).unwrap();
+        assert_eq!(imported.events[0].exdates.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_rrule_value() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 10:00:00", tz).unwrap();
+
+        // Basic FREQ + COUNT
+        let rec = parse_rrule_value("FREQ=WEEKLY;COUNT=4", start).unwrap();
+        assert_eq!(rec.frequency(), rrule::Frequency::Weekly);
+        assert_eq!(rec.get_count(), Some(4));
+        assert_eq!(rec.get_interval(), 1);
+
+        // FREQ + INTERVAL + BYDAY
+        let rec = parse_rrule_value("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR", start).unwrap();
+        assert_eq!(rec.get_interval(), 2);
+        let wd = rec.get_weekdays().unwrap();
+        assert_eq!(wd.len(), 3);
+        assert!(wd.contains(&chrono::Weekday::Mon));
+        assert!(wd.contains(&chrono::Weekday::Wed));
+        assert!(wd.contains(&chrono::Weekday::Fri));
+
+        // FREQ + UNTIL
+        let rec = parse_rrule_value("FREQ=DAILY;UNTIL=20250201T000000Z", start).unwrap();
+        assert!(rec.get_until().is_some());
+
+        // FREQ + UNTIL with DATE-only format (no time component)
+        let rec = parse_rrule_value("FREQ=DAILY;UNTIL=20250201", start).unwrap();
+        assert!(rec.get_until().is_some());
+    }
+
+    #[test]
+    fn test_parse_rrule_rejects_unsupported_parts() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 10:00:00", tz).unwrap();
+
+        // BYMONTH is unsupported — must return Err, not silently drop
+        let result = parse_rrule_value("FREQ=DAILY;COUNT=90;BYMONTH=3", start);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("BYMONTH"),
+            "Error should mention unsupported component: {}",
+            err_msg
+        );
+
+        // BYSETPOS is unsupported
+        let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1", start);
+        assert!(result.is_err());
+
+        // Ordinal-prefixed BYDAY like 1MO or -1FR must be rejected
+        let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=1MO", start);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("1MO"), "Error should mention the token: {}", err_msg);
+
+        let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=-1FR", start);
+        assert!(result.is_err());
+
+        // COUNT + UNTIL together must be rejected per RFC 5545
+        let result = parse_rrule_value("FREQ=DAILY;COUNT=10;UNTIL=20250201T000000Z", start);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("COUNT") && err_msg.contains("UNTIL"),
+            "Error should mention both COUNT and UNTIL: {}",
+            err_msg
+        );
     }
 }

@@ -6,7 +6,7 @@
 //! ## Features
 //!
 //! - **Timezone-aware events**: All date/time fields use `chrono` with `chrono-tz` for proper timezone handling
-//! - **Recurrence rules**: Support for daily, weekly, monthly, and yearly recurrence patterns
+//! - **Recurrence rules**: Support for all seven RFC 5545 frequencies (secondly, minutely, hourly, daily, weekly, monthly, yearly)
 //! - **Exceptions**: Skip specific dates or apply custom filters (e.g., skip weekends)
 //! - **ICS support**: Import and export events using the iCalendar format (RFC 5545 compliant with TZID support)
 //! - **Builder API**: Ergonomic, fluent interface for creating events and calendars
@@ -103,14 +103,14 @@
 //! - [`event`] - Event types and builder API
 //! - [`gap_validation`] - Schedule analysis, gap detection, and conflict resolution (unique feature)
 //! - [`ics`] - ICS (iCalendar) import/export with TZID support
-//! - [`recurrence`] - Recurrence patterns (daily, weekly, monthly, yearly)
+//! - [`recurrence`] - Recurrence patterns (secondly, minutely, hourly, daily, weekly, monthly, yearly)
 //! - [`timezone`] - Timezone utilities with DST awareness
 //!
 //! ## Examples
 //!
 //! See the `examples/` directory for more comprehensive examples:
 //! - `basic.rs` - Simple calendar creation and event management
-//! - `recurrence.rs` - Daily, weekly, monthly, and yearly recurrence patterns
+//! - `recurrence.rs` - All seven RFC 5545 recurrence frequencies with lazy iteration and DST handling
 //! - `ics_export.rs` - ICS import/export functionality
 //! - `timezone_ics_export.rs` - Timezone-aware ICS export demonstration
 //! - `gap_validation.rs` - Schedule analysis and gap detection features
@@ -127,8 +127,8 @@ mod error;
 pub use calendar::Calendar;
 pub use error::{EventixError, Result};
 pub use event::{Event, EventBuilder, EventStatus};
-pub use recurrence::Recurrence;
+pub use recurrence::{OccurrenceIterator, Recurrence};
 
-// Re-export commonly used types
-pub use chrono::{DateTime, Duration, NaiveDateTime};
+// Re-export commonly used types from chrono
+pub use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 pub use chrono_tz::Tz;
