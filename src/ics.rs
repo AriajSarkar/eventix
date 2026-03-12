@@ -244,18 +244,7 @@ fn ical_to_event(ical_event: &IEvent) -> Result<Event> {
             let value = prop.value();
             // Determine timezone for this EXDATE
             let exdate_tz = if let Some(tzid_param) = prop.params().get("TZID") {
-                let tz_str_raw = format!("{:?}", tzid_param);
-                if let Some(start_idx) = tz_str_raw.find("val: \"") {
-                    let start = start_idx + 6;
-                    let remaining = &tz_str_raw[start..];
-                    if let Some(end_idx) = remaining.find('"') {
-                        crate::timezone::parse_timezone(&remaining[..end_idx]).unwrap_or(event_tz)
-                    } else {
-                        event_tz
-                    }
-                } else {
-                    event_tz
-                }
+                crate::timezone::parse_timezone(tzid_param.value()).unwrap_or(event_tz)
             } else if value.ends_with('Z') {
                 crate::timezone::parse_timezone("UTC").unwrap_or(event_tz)
             } else {
@@ -362,6 +351,13 @@ fn parse_rrule_value(rrule_str: &str, dtstart: DateTime<Tz>) -> Result<Recurrenc
     let freq = frequency
         .ok_or_else(|| EventixError::IcsError("RRULE missing FREQ component".to_string()))?;
 
+    // RFC 5545 §3.3.10: COUNT and UNTIL MUST NOT both appear in the same rule
+    if count.is_some() && until.is_some() {
+        return Err(EventixError::IcsError(
+            "RRULE must not contain both COUNT and UNTIL".to_string(),
+        ));
+    }
+
     let mut recurrence = Recurrence::new(freq).interval(interval);
     if let Some(c) = count {
         recurrence = recurrence.count(c);
@@ -386,28 +382,7 @@ fn extract_datetime_with_tz(ical_event: &IEvent, prop_name: &str) -> Result<(Dat
 
             // Check if there's a TZID parameter
             let timezone = if let Some(tzid_param) = prop.params().get("TZID") {
-                // Parse the timezone from TZID parameter (use Debug format)
-                // Debug format is: Parameter { key: "TZID", val: "America/New_York" }
-                let tz_str_raw = format!("{:?}", tzid_param);
-                // Extract the value after 'val: "'
-                let tz_str = if let Some(start_idx) = tz_str_raw.find("val: \"") {
-                    let start = start_idx + 6; // Length of 'val: "'
-                    let remaining = &tz_str_raw[start..];
-                    if let Some(end_idx) = remaining.find('"') {
-                        remaining[..end_idx].to_string()
-                    } else {
-                        return Err(EventixError::InvalidTimezone(format!(
-                            "Cannot parse TZID parameter: {}",
-                            tz_str_raw
-                        )));
-                    }
-                } else {
-                    return Err(EventixError::InvalidTimezone(format!(
-                        "Cannot parse TZID parameter: {}",
-                        tz_str_raw
-                    )));
-                };
-                crate::timezone::parse_timezone(&tz_str)?
+                crate::timezone::parse_timezone(tzid_param.value())?
             } else if value.ends_with('Z') {
                 // UTC timezone
                 crate::timezone::parse_timezone("UTC")?
@@ -589,5 +564,15 @@ mod tests {
 
         let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=-1FR", start);
         assert!(result.is_err());
+
+        // COUNT + UNTIL together must be rejected per RFC 5545
+        let result = parse_rrule_value("FREQ=DAILY;COUNT=10;UNTIL=20250201T000000Z", start);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("COUNT") && err_msg.contains("UNTIL"),
+            "Error should mention both COUNT and UNTIL: {}",
+            err_msg
+        );
     }
 }

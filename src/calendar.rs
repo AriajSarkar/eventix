@@ -465,6 +465,14 @@ fn json_to_recurrence(val: &serde_json::Value, tz: Tz) -> crate::error::Result<R
         _ => return Err(EventixError::Other(format!("Unknown frequency: {}", freq_str))),
     };
     let interval = val["interval"].as_u64().unwrap_or(1) as u16;
+
+    // RFC 5545: COUNT and UNTIL must not both be present
+    if val["count"].is_u64() && val["until"].is_string() {
+        return Err(EventixError::Other(
+            "Recurrence cannot have both 'count' and 'until'".to_string(),
+        ));
+    }
+
     let mut rec = Recurrence::new(frequency).interval(interval);
     if let Some(c) = val["count"].as_u64() {
         let count = u32::try_from(c)
