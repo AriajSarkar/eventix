@@ -403,30 +403,47 @@ fn extract_datetime_with_tz(ical_event: &IEvent, prop_name: &str) -> Result<(Dat
 }
 
 /// Parse an iCalendar datetime value string
+///
+/// Accepts both DATE-TIME format (`YYYYMMDDTHHMMSS`, 15+ chars) and
+/// DATE-only format (`YYYYMMDD`, exactly 8 chars). DATE-only values
+/// default to midnight (00:00:00).
 fn parse_ical_datetime_value(dt_str: &str, tz: Tz) -> Result<DateTime<Tz>> {
-    // Format: YYYYMMDDTHHMMSS
-    if dt_str.len() < 15 {
+    // DATE-only format: YYYYMMDD (8 chars, no 'T' separator)
+    let (year, month, day, hour, minute, second) = if dt_str.len() == 8 && !dt_str.contains('T') {
+        let year: i32 = dt_str[0..4]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid year in: {}", dt_str)))?;
+        let month: u32 = dt_str[4..6]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid month in: {}", dt_str)))?;
+        let day: u32 = dt_str[6..8]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid day in: {}", dt_str)))?;
+        (year, month, day, 0, 0, 0)
+    } else if dt_str.len() >= 15 {
+        // DATE-TIME format: YYYYMMDDTHHMMSS
+        let year: i32 = dt_str[0..4]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid year in: {}", dt_str)))?;
+        let month: u32 = dt_str[4..6]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid month in: {}", dt_str)))?;
+        let day: u32 = dt_str[6..8]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid day in: {}", dt_str)))?;
+        let hour: u32 = dt_str[9..11]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid hour in: {}", dt_str)))?;
+        let minute: u32 = dt_str[11..13]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid minute in: {}", dt_str)))?;
+        let second: u32 = dt_str[13..15]
+            .parse()
+            .map_err(|_| EventixError::DateTimeParse(format!("Invalid second in: {}", dt_str)))?;
+        (year, month, day, hour, minute, second)
+    } else {
         return Err(EventixError::DateTimeParse(format!("Invalid datetime format: {}", dt_str)));
-    }
-
-    let year: i32 = dt_str[0..4]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid year in: {}", dt_str)))?;
-    let month: u32 = dt_str[4..6]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid month in: {}", dt_str)))?;
-    let day: u32 = dt_str[6..8]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid day in: {}", dt_str)))?;
-    let hour: u32 = dt_str[9..11]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid hour in: {}", dt_str)))?;
-    let minute: u32 = dt_str[11..13]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid minute in: {}", dt_str)))?;
-    let second: u32 = dt_str[13..15]
-        .parse()
-        .map_err(|_| EventixError::DateTimeParse(format!("Invalid second in: {}", dt_str)))?;
+    };
 
     let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
         .and_then(|d| d.and_hms_opt(hour, minute, second))
@@ -534,6 +551,10 @@ mod tests {
 
         // FREQ + UNTIL
         let rec = parse_rrule_value("FREQ=DAILY;UNTIL=20250201T000000Z", start).unwrap();
+        assert!(rec.get_until().is_some());
+
+        // FREQ + UNTIL with DATE-only format (no time component)
+        let rec = parse_rrule_value("FREQ=DAILY;UNTIL=20250201", start).unwrap();
         assert!(rec.get_until().is_some());
     }
 

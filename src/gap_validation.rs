@@ -260,9 +260,9 @@ pub fn find_overlaps(
     occurrences.retain(|e| e.event.is_active());
 
     // Filter out zero-duration events (where start == end)
-    // These would cause the END checkpoint to be processed before START
-    // due to the sorting order (ends before starts at same time),
-    // resulting in the event never being added to the active set.
+    // With zero duration, the END checkpoint is processed as a no-op (event not yet active),
+    // then START adds the event to the active set where it is never removed,
+    // causing false-positive overlaps with all subsequent events.
     occurrences.retain(|occ| occ.occurrence_time != occ.end_time());
 
     // Early return for trivial cases (moved after zero-duration filter)

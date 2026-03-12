@@ -464,10 +464,13 @@ fn json_to_recurrence(val: &serde_json::Value, tz: Tz) -> crate::error::Result<R
         "yearly" => Frequency::Yearly,
         _ => return Err(EventixError::Other(format!("Unknown frequency: {}", freq_str))),
     };
-    let interval = val["interval"].as_u64().unwrap_or(1) as u16;
+    let interval_raw = val["interval"].as_u64().unwrap_or(1);
+    let interval = u16::try_from(interval_raw).map_err(|_| {
+        EventixError::Other(format!("Recurrence interval {} exceeds u16::MAX", interval_raw))
+    })?;
 
     // RFC 5545: COUNT and UNTIL must not both be present
-    if val["count"].is_u64() && val["until"].is_string() {
+    if !val["count"].is_null() && !val["until"].is_null() {
         return Err(EventixError::Other(
             "Recurrence cannot have both 'count' and 'until'".to_string(),
         ));
@@ -672,5 +675,38 @@ mod tests {
         }"#;
         let result = Calendar::from_json(json);
         assert!(result.is_err(), "Should reject unparseable exdate");
+    }
+
+    #[test]
+    fn test_json_import_rejects_overflowing_interval() {
+        let json = r#"{
+            "name": "Test",
+            "events": [{
+                "title": "Big Interval",
+                "start_time": "2025-01-06T09:00:00+00:00",
+                "end_time": "2025-01-06T10:00:00+00:00",
+                "timezone": "UTC",
+                "recurrence": { "frequency": "daily", "interval": 999999, "count": 5 }
+            }]
+        }"#;
+        let result = Calendar::from_json(json);
+        assert!(result.is_err(), "Should reject interval exceeding u16::MAX");
+    }
+
+    #[test]
+    fn test_json_import_rejects_count_and_until() {
+        // Even non-canonical types (e.g. count as string) should be caught
+        let json = r#"{
+            "name": "Test",
+            "events": [{
+                "title": "Both",
+                "start_time": "2025-01-06T09:00:00+00:00",
+                "end_time": "2025-01-06T10:00:00+00:00",
+                "timezone": "UTC",
+                "recurrence": { "frequency": "daily", "count": "10", "until": "2025-02-01T00:00:00+00:00" }
+            }]
+        }"#;
+        let result = Calendar::from_json(json);
+        assert!(result.is_err(), "Should reject both count and until");
     }
 }
