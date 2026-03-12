@@ -26,12 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DST spring-forward resilience**: Recurrence generation uses pre-gap UTC offset conversion to land on the correct post-transition wall-clock time (e.g. 2:30 AM EST → 3:30 AM EDT), matching Google Calendar / RFC 5545 behaviour. Subsequent occurrences return to the originally intended time rather than drifting.
 - **Deterministic overlap ordering**: `find_overlaps()` uses `BTreeSet` for consistent results.
 - **Zero-duration events**: No longer interfere with overlap detection.
+- **[BREAKING]** `generate_occurrences()` now returns an error for unbounded recurrences (no `count` or `until`). Use `occurrences()` for lazy iteration or `generate_occurrences_capped()` for a hard cap.
 
 ### Fixed
 - `occurs_on()` now correctly finds later occurrences of recurring events by using lazy iteration with post-filter capping.
 - `occurrences_between()` now applies recurrence filters and exception dates lazily *before* the `max_occurrences` cap, so filtered-out dates don't consume result slots and capped queries stop after enough accepted results.
 - `interval(0)` returns no occurrences instead of looping infinitely (previously caused an infinite loop). Consistent across all frequencies including weekly with BYDAY rules.
-- `generate_occurrences()` now returns an error for unbounded recurrences (no `count` or `until`). Use `occurrences()` for lazy iteration or `generate_occurrences_capped()` for a hard cap.
 - `to_rrule_string()` now converts `UNTIL` values to UTC before appending the `Z` suffix, per RFC 5545 compliance.
 
 ## [0.3.1] - 2025-12-18
