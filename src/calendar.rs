@@ -331,24 +331,27 @@ impl Calendar {
                             arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
                         })
                         .unwrap_or_default(),
-                    recurrence: event_val
-                        .get("recurrence")
-                        .and_then(|v| json_to_recurrence(v, tz).ok()),
+                    recurrence: match event_val.get("recurrence") {
+                        Some(v) => Some(json_to_recurrence(v, tz)?),
+                        None => None,
+                    },
                     recurrence_filter: None,
-                    exdates: event_val["exdates"]
-                        .as_array()
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| {
-                                    v.as_str().and_then(|s| {
-                                        chrono::DateTime::parse_from_rfc3339(s)
-                                            .ok()
-                                            .map(|dt| dt.with_timezone(&tz))
-                                    })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default(),
+                    exdates: match event_val["exdates"].as_array() {
+                        Some(arr) => {
+                            let mut dates = Vec::with_capacity(arr.len());
+                            for (i, v) in arr.iter().enumerate() {
+                                let s = v.as_str().ok_or_else(|| {
+                                    EventixError::Other(format!("exdates[{}]: expected string", i))
+                                })?;
+                                let dt = chrono::DateTime::parse_from_rfc3339(s).map_err(|e| {
+                                    EventixError::DateTimeParse(format!("exdates[{}]: {}", i, e))
+                                })?;
+                                dates.push(dt.with_timezone(&tz));
+                            }
+                            dates
+                        }
+                        None => Vec::new(),
+                    },
                     location: event_val["location"].as_str().map(|s| s.to_string()),
                     uid: event_val["uid"].as_str().map(|s| s.to_string()),
                     status: match event_val.get("status") {
@@ -461,9 +464,9 @@ fn json_to_recurrence(val: &serde_json::Value, tz: Tz) -> crate::error::Result<R
         rec = rec.count(c as u32);
     }
     if let Some(until_str) = val["until"].as_str() {
-        if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(until_str) {
-            rec = rec.until(parsed.with_timezone(&tz));
-        }
+        let parsed = chrono::DateTime::parse_from_rfc3339(until_str)
+            .map_err(|e| EventixError::DateTimeParse(format!("recurrence until: {}", e)))?;
+        rec = rec.until(parsed.with_timezone(&tz));
     }
     if let Some(weekdays_arr) = val["weekdays"].as_array() {
         let mut weekdays = Vec::new();
@@ -477,7 +480,7 @@ fn json_to_recurrence(val: &serde_json::Value, tz: Tz) -> crate::error::Result<R
                     "FR" => chrono::Weekday::Fri,
                     "SA" => chrono::Weekday::Sat,
                     "SU" => chrono::Weekday::Sun,
-                    _ => continue,
+                    _ => return Err(EventixError::Other(format!("Unknown weekday: {}", wd_str))),
                 };
                 weekdays.push(wd);
             }
@@ -619,5 +622,39 @@ mod tests {
         assert_eq!(rec.get_interval(), 2);
         assert_eq!(rec.get_count(), Some(10));
         assert_eq!(ev.exdates.len(), 1);
+    }
+
+    #[test]
+    fn test_json_import_rejects_bad_recurrence() {
+        // Malformed recurrence frequency should fail import, not silently drop
+        let json = r#"{
+            "name": "Test",
+            "events": [{
+                "title": "Bad Recurrence",
+                "start_time": "2025-01-06T09:00:00+00:00",
+                "end_time": "2025-01-06T10:00:00+00:00",
+                "timezone": "UTC",
+                "recurrence": { "frequency": "biweekly", "interval": 1 }
+            }]
+        }"#;
+        let result = Calendar::from_json(json);
+        assert!(result.is_err(), "Should reject unknown recurrence frequency");
+    }
+
+    #[test]
+    fn test_json_import_rejects_bad_exdate() {
+        // Malformed exdate should fail import, not silently drop
+        let json = r#"{
+            "name": "Test",
+            "events": [{
+                "title": "Bad Exdate",
+                "start_time": "2025-01-06T09:00:00+00:00",
+                "end_time": "2025-01-06T10:00:00+00:00",
+                "timezone": "UTC",
+                "exdates": ["not-a-date"]
+            }]
+        }"#;
+        let result = Calendar::from_json(json);
+        assert!(result.is_err(), "Should reject unparseable exdate");
     }
 }

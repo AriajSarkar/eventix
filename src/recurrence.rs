@@ -564,6 +564,12 @@ fn skip_subdaily_to_matching_day(
     interval: u16,
     weekdays: &[chrono::Weekday],
 ) -> Option<DateTime<Tz>> {
+    // If current already falls on a matching weekday, return it as-is.
+    // This happens when compute_next() crosses midnight into a valid day.
+    if weekdays.contains(&current.weekday()) {
+        return Some(current);
+    }
+
     let tz = current.timezone();
     let mut target_date = current.date_naive();
 
@@ -2028,5 +2034,32 @@ mod tests {
         assert_eq!(occurrences[0].year(), 2026);
         assert_eq!(occurrences[0].month(), 1);
         assert_eq!(occurrences[0].day(), 5);
+    }
+
+    #[test]
+    fn test_subdaily_skip_does_not_overshoot_matching_day() {
+        use chrono::Datelike;
+        // Start Saturday 23:00, hourly, weekdays=[Sun, Mon].
+        // Second occurrence crosses midnight into Sunday — must NOT skip Sunday.
+        let tz = parse_timezone("UTC").unwrap();
+        // 2025-06-07 is a Saturday
+        let start = crate::timezone::parse_datetime_with_tz("2025-06-07 23:00:00", tz).unwrap();
+        assert_eq!(start.weekday(), chrono::Weekday::Sat);
+
+        let recurrence = Recurrence::hourly()
+            .interval(1)
+            .weekdays(vec![chrono::Weekday::Sun, chrono::Weekday::Mon])
+            .count(3);
+
+        let occurrences: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occurrences.len(), 3);
+        // First occurrence: Sunday 00:00 (first valid slot after Sat 23:00)
+        assert_eq!(occurrences[0].weekday(), chrono::Weekday::Sun);
+        assert_eq!(occurrences[0].day(), 8);
+        assert_eq!(occurrences[0].hour(), 0);
+        // Second: Sunday 01:00
+        assert_eq!(occurrences[1].hour(), 1);
+        // Third: Sunday 02:00
+        assert_eq!(occurrences[2].hour(), 2);
     }
 }

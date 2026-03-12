@@ -176,11 +176,17 @@ fn event_to_ical(event: &Event) -> Result<IEvent> {
     }
 
     // Add exception dates with timezone (EXDATE is a multi-property in RFC 5545)
+    // Normalize each exdate to the event timezone before formatting so the
+    // stamped local time matches the TZID label.
+    let event_tz = event.start_time.timezone();
     for exdate in &event.exdates {
-        let exdate_str = exdate.format("%Y%m%dT%H%M%S").to_string();
         if tz_name == "UTC" {
+            let exdate_utc = exdate.with_timezone(&chrono::Utc);
+            let exdate_str = exdate_utc.format("%Y%m%dT%H%M%S").to_string();
             ical_event.add_multi_property("EXDATE", &format!("{}Z", exdate_str));
         } else {
+            let exdate_local = exdate.with_timezone(&event_tz);
+            let exdate_str = exdate_local.format("%Y%m%dT%H%M%S").to_string();
             let mut exdate_prop = Property::new("EXDATE", &exdate_str);
             exdate_prop.add_parameter("TZID", tz_name);
             ical_event.append_multi_property(exdate_prop);
@@ -220,14 +226,14 @@ fn ical_to_event(ical_event: &IEvent) -> Result<Event> {
         builder = builder.uid(uid);
     }
 
-    // Parse RRULE if present
+    // Parse RRULE if present — reject unsupported rules instead of silently
+    // degrading, since dropping BYMONTH etc. would produce a broader schedule.
     let props = ical_event.properties();
     for (key, prop) in props {
         if key == "RRULE" {
             let rrule_value = prop.value();
-            if let Ok(recurrence) = parse_rrule_value(rrule_value, start_time) {
-                builder = builder.recurrence(recurrence);
-            }
+            let recurrence = parse_rrule_value(rrule_value, start_time)?;
+            builder = builder.recurrence(recurrence);
         }
     }
 
@@ -338,7 +344,12 @@ fn parse_rrule_value(rrule_str: &str, dtstart: DateTime<Tz>) -> Result<Recurrenc
                     by_weekday = Some(weekdays);
                 }
             }
-            _ => {} // Ignore other RRULE parts (BYMONTH, BYSETPOS, etc.)
+            other => {
+                return Err(EventixError::IcsError(format!(
+                    "Unsupported RRULE component: {}",
+                    other
+                )))
+            }
         }
     }
 
@@ -543,5 +554,25 @@ mod tests {
         // FREQ + UNTIL
         let rec = parse_rrule_value("FREQ=DAILY;UNTIL=20250201T000000Z", start).unwrap();
         assert!(rec.get_until().is_some());
+    }
+
+    #[test]
+    fn test_parse_rrule_rejects_unsupported_parts() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 10:00:00", tz).unwrap();
+
+        // BYMONTH is unsupported — must return Err, not silently drop
+        let result = parse_rrule_value("FREQ=DAILY;COUNT=90;BYMONTH=3", start);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("BYMONTH"),
+            "Error should mention unsupported component: {}",
+            err_msg
+        );
+
+        // BYSETPOS is unsupported
+        let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1", start);
+        assert!(result.is_err());
     }
 }
