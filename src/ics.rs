@@ -263,9 +263,10 @@ fn ical_to_event(ical_event: &IEvent) -> Result<Event> {
             };
 
             let dt_str = value.trim_end_matches('Z');
-            if let Ok(exdate_dt) = parse_ical_datetime_value(dt_str, exdate_tz) {
-                builder = builder.exception_date(exdate_dt);
-            }
+            let exdate_dt = parse_ical_datetime_value(dt_str, exdate_tz).map_err(|e| {
+                EventixError::IcsError(format!("Failed to parse EXDATE '{}': {}", value, e))
+            })?;
+            builder = builder.exception_date(exdate_dt);
         }
     }
 
@@ -336,7 +337,12 @@ fn parse_rrule_value(rrule_str: &str, dtstart: DateTime<Tz>) -> Result<Recurrenc
                         "FR" => chrono::Weekday::Fri,
                         "SA" => chrono::Weekday::Sat,
                         "SU" => chrono::Weekday::Sun,
-                        _ => continue,
+                        other => {
+                            return Err(EventixError::IcsError(format!(
+                                "Unsupported BYDAY value '{}' (ordinal prefixes like 1MO or -1FR are not supported)",
+                                other
+                            )))
+                        }
                     };
                     weekdays.push(wd);
                 }
@@ -573,6 +579,15 @@ mod tests {
 
         // BYSETPOS is unsupported
         let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1", start);
+        assert!(result.is_err());
+
+        // Ordinal-prefixed BYDAY like 1MO or -1FR must be rejected
+        let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=1MO", start);
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("1MO"), "Error should mention the token: {}", err_msg);
+
+        let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=-1FR", start);
         assert!(result.is_err());
     }
 }

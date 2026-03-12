@@ -154,6 +154,12 @@ impl Calendar {
     /// This expands recurring events into individual occurrences.
     /// Uses [events_between_capped](Self::events_between_capped) with a
     /// per-event limit of 100,000 occurrences.
+    ///
+    /// **Note:** If any single event generates more than 100,000 occurrences
+    /// within the range (e.g. a secondly recurrence over a large window),
+    /// the result will be silently truncated.  Use
+    /// [`events_between_capped`](Self::events_between_capped) with an
+    /// explicit cap when result completeness is critical.
     pub fn events_between(
         &self,
         start: DateTime<Tz>,
@@ -461,7 +467,9 @@ fn json_to_recurrence(val: &serde_json::Value, tz: Tz) -> crate::error::Result<R
     let interval = val["interval"].as_u64().unwrap_or(1) as u16;
     let mut rec = Recurrence::new(frequency).interval(interval);
     if let Some(c) = val["count"].as_u64() {
-        rec = rec.count(c as u32);
+        let count = u32::try_from(c)
+            .map_err(|_| EventixError::Other(format!("Recurrence count {} exceeds u32::MAX", c)))?;
+        rec = rec.count(count);
     }
     if let Some(until_str) = val["until"].as_str() {
         let parsed = chrono::DateTime::parse_from_rfc3339(until_str)
