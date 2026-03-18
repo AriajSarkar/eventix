@@ -47,3 +47,10 @@ This document outlines the strategic technical direction for the `eventix` crate
 - [ ] **Property-Based Testing** `(Priority: High)`
     - **Action**: Implement `proptest` suites for `gap_validation`.
     - **Goal**: mathematically guarantee no overlapping slots are missed under edge-case conditions (e.g., DST transitions).
+
+## 5. Calendar View API
+*Objective: Expose lazy, UI-friendly calendar traversal primitives for day/week rendering.*
+
+- [x] **Day and Week View Iterators** `(Priority: Medium)`
+    - **Feature**: Add lazy `Calendar::days()` / `days_back()` and `Calendar::weeks()` / `weeks_back()` iterators that yield pre-bucketed `DayView` and `WeekView` values.
+    - **Use Case**: Lets consumers render personal calendar UIs in frameworks like Yew, Leptos, and Dioxus without eagerly expanding wide date ranges or manually grouping occurrences by day.

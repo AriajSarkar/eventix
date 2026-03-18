@@ -1,6 +1,6 @@
 # Eventix 📅
 
-A high-level calendar and recurrence library for Rust with timezone-aware scheduling, exceptions, and ICS import/export.
+A high-level calendar and recurrence library for Rust with timezone-aware scheduling, exceptions, ICS import/export, and lazy calendar views.
 
 [![Crates.io](https://img.shields.io/crates/v/eventix.svg)](https://crates.io/crates/eventix)
 [![Documentation](https://docs.rs/eventix/badge.svg)](https://docs.rs/eventix)
@@ -11,6 +11,7 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 
 - 🌍 **Timezone-aware events** - Full support for timezones and DST handling using `chrono-tz`
 - 🔄 **Recurrence patterns** - All seven RFC 5545 frequencies (secondly, minutely, hourly, daily, weekly, monthly, yearly) with advanced rules
+- 🗓️ **Calendar view iterators** - Lazy day/week traversal for UI rendering and infinite-scroll agendas
 - 🚫 **Exception handling** - Skip specific dates, weekends, or custom holiday lists
 - 🚦 **Booking workflow** - Manage event status (`Confirmed`, `Tentative`, `Cancelled`) with smart gap validation
 - 📅 **ICS support** - Import and export events using the iCalendar (`.ics`) format
@@ -28,6 +29,7 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 | **Booking State** | ✅ Confirmed/Cancelled | ❌ No Concept | ❌ No Concept |
 | **Timezone/DST** | ✅ Built-in (`chrono-tz`) | ⚠️ Partial | ✅ Built-in |
 | **Recurrence** | ✅ RRule + Exdates | ✅ RRule | ❌ None |
+| **View Iterators** | ✅ Day/Week lazy APIs | ❌ Manual Grouping | ❌ Manual Logic |
 
 ## Quick Start
 
@@ -35,7 +37,7 @@ Add eventix to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-eventix = "0.4.0"
+eventix = "0.5.0"
 ```
 
 ### Basic Usage
@@ -179,6 +181,49 @@ let mondays: Vec<_> = daily.occurrences(start)
     .take(10)
     .collect();
 ```
+
+### Calendar View Iterators
+
+For UI rendering, `Calendar::days()` and `Calendar::weeks()` lazily bucket
+active occurrences into day/week views. This avoids choosing a large query
+window up front and maps cleanly into frontend components. The iterators yield
+`Result<DayView>` / `Result<WeekView>` so expansion errors stay explicit.
+
+```rust
+use eventix::{Calendar, Event, Recurrence, timezone};
+
+let mut cal = Calendar::new("Personal");
+cal.add_event(
+    Event::builder()
+        .title("Standup")
+        .start("2025-11-04 10:00:00", "America/New_York")
+        .duration_minutes(15)
+        .recurrence(Recurrence::daily().count(10))
+        .build()?
+);
+
+let tz = timezone::parse_timezone("America/New_York")?;
+let start = timezone::parse_datetime_with_tz("2025-11-03 00:00:00", tz)?;
+
+let busy_days: Vec<_> = cal.days(start)
+    .take(14)
+    .collect::<eventix::Result<Vec<_>>>()?
+    .into_iter()
+    .filter(|day| !day.is_empty())
+    .collect();
+
+for week in cal.weeks(start).take(2) {
+    let week = week?;
+    println!("{} -> {}", week.start_date(), week.event_count());
+}
+```
+
+`DayView::start()` and `DayView::end()` expose the actual half-open day window
+`[start, end)`, so `end()` is the next midnight. Use `end_inclusive()` only for
+display formatting. Day and week views are built by interval intersection, so
+overnight events appear on every day they overlap. If you're passing large
+`DayView` values through Yew props, wrapping them in `Rc<DayView>` can avoid
+expensive prop clones.
 
 ### Booking Status
 
@@ -329,6 +374,9 @@ Run the examples:
 # Basic calendar usage
 cargo run --example basic
 
+# Day/week calendar views
+cargo run --example calendar_views
+
 # Recurrence patterns
 cargo run --example recurrence
 
@@ -352,6 +400,7 @@ The crate is organized into several modules:
 - **`calendar`** - Calendar container for managing events
 - **`event`** - Event types and builder API
 - **`recurrence`** - Recurrence rules and patterns
+- **`views`** - Lazy day/week calendar view iterators
 - **`ics`** - ICS format import/export
 - **`timezone`** - Timezone handling and DST support
 - **`gap_validation`** - Schedule analysis, gap detection, conflict resolution

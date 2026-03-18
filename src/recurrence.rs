@@ -1,7 +1,8 @@
 //! Recurrence rules and patterns for repeating events
 
 use crate::error::Result;
-use chrono::{DateTime, Datelike, Offset, TimeZone};
+use crate::timezone::resolve_local;
+use chrono::{DateTime, Datelike};
 use chrono_tz::Tz;
 use rrule::Frequency;
 
@@ -358,30 +359,6 @@ impl Recurrence {
 /// Shared helper used by the eager generation helpers and the lazy
 /// `OccurrenceIterator`.
 ///
-/// Resolve a `NaiveDateTime` to a timezone-aware `DateTime<Tz>`, handling
-/// DST transitions:
-///
-/// - **Normal / fall-back (ambiguous)**: picks the earlier of two candidates
-/// - **Spring-forward (gap)**: the local time doesn't exist; applies the
-///   pre-gap UTC offset so the resulting wall-clock time shifts forward by
-///   exactly the gap size (e.g. 2:30 AM EST → 3:30 AM EDT), matching
-///   Google Calendar / RFC 5545 behaviour
-fn resolve_local(tz: Tz, naive: chrono::NaiveDateTime) -> Option<DateTime<Tz>> {
-    if let Some(dt) = tz.from_local_datetime(&naive).earliest() {
-        return Some(dt);
-    }
-    // DST gap: the local time doesn't exist.  Determine the UTC offset
-    // that was in effect just before the gap by resolving a time one day
-    // earlier (guaranteed to exist outside the gap).  Converting the
-    // nonexistent local time with that offset naturally lands on the
-    // correct post-transition wall-clock time.
-    let day_before = naive - chrono::Duration::days(1);
-    let pre_gap_dt = tz.from_local_datetime(&day_before).earliest()?;
-    let pre_offset = pre_gap_dt.offset().fix();
-    let utc_naive = naive - pre_offset;
-    Some(chrono::Utc.from_utc_datetime(&utc_naive).with_timezone(&tz))
-}
-
 /// Advance a `DateTime<Tz>` by one recurrence step.
 ///
 /// `intended_time` is the original start's wall-clock time. For

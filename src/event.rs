@@ -2,14 +2,16 @@
 
 use crate::error::{EventixError, Result};
 use crate::recurrence::{Recurrence, RecurrenceFilter};
-use crate::timezone::{parse_datetime_with_tz, parse_timezone};
-use chrono::{DateTime, Duration, TimeZone};
+use crate::timezone::{local_day_window, parse_datetime_with_tz, parse_timezone};
+use chrono::{DateTime, Duration};
 use chrono_tz::Tz;
 
 use serde::{Deserialize, Serialize};
 
 /// Status of an event in the booking lifecycle
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub enum EventStatus {
     /// The event is confirmed and occupies time (default)
     #[default]
@@ -151,20 +153,7 @@ impl Event {
 
     /// Check if this event occurs on a specific date
     pub fn occurs_on(&self, date: DateTime<Tz>) -> Result<bool> {
-        let start = date.date_naive().and_hms_opt(0, 0, 0).ok_or_else(|| {
-            EventixError::ValidationError("Invalid start time for date check".to_string())
-        })?;
-        let end = date.date_naive().and_hms_opt(23, 59, 59).ok_or_else(|| {
-            EventixError::ValidationError("Invalid end time for date check".to_string())
-        })?;
-
-        let start_dt = self.timezone.from_local_datetime(&start).earliest().ok_or_else(|| {
-            EventixError::ValidationError("Ambiguous start time for date check".to_string())
-        })?;
-        let end_dt = self.timezone.from_local_datetime(&end).latest().ok_or_else(|| {
-            EventixError::ValidationError("Ambiguous end time for date check".to_string())
-        })?;
-
+        let (start_dt, end_dt) = local_day_window(date.date_naive(), self.timezone)?;
         let occurrences = self.occurrences_between(start_dt, end_dt, 1)?;
         Ok(!occurrences.is_empty())
     }

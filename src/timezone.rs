@@ -1,7 +1,7 @@
 //! Timezone handling utilities with DST awareness
 
 use crate::error::{EventixError, Result};
-use chrono::{DateTime, NaiveDateTime, Offset, TimeZone};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, Offset, TimeZone};
 use chrono_tz::Tz;
 
 /// Parse a timezone string into a `Tz` object
@@ -58,6 +58,40 @@ pub fn parse_datetime_with_tz(datetime_str: &str, tz: Tz) -> Result<DateTime<Tz>
     })
 }
 
+/// Resolve a local datetime in a timezone, preserving wall-clock semantics
+/// across DST gaps by applying the pre-gap UTC offset.
+pub(crate) fn resolve_local(tz: Tz, naive: NaiveDateTime) -> Option<DateTime<Tz>> {
+    if let Some(dt) = tz.from_local_datetime(&naive).earliest() {
+        return Some(dt);
+    }
+
+    let day_before = naive - chrono::Duration::days(1);
+    let pre_gap_dt = tz.from_local_datetime(&day_before).earliest()?;
+    let pre_offset = pre_gap_dt.offset().fix();
+    let utc_naive = naive - pre_offset;
+    Some(chrono::Utc.from_utc_datetime(&utc_naive).with_timezone(&tz))
+}
+
+/// Compute the inclusive start and exclusive end of a local calendar day.
+pub(crate) fn local_day_window(date: NaiveDate, tz: Tz) -> Result<(DateTime<Tz>, DateTime<Tz>)> {
+    let start_naive = date
+        .and_hms_opt(0, 0, 0)
+        .ok_or_else(|| EventixError::ValidationError("Invalid start time".to_string()))?;
+    let next_date = date
+        .succ_opt()
+        .ok_or_else(|| EventixError::ValidationError("Invalid end time".to_string()))?;
+    let end_naive = next_date
+        .and_hms_opt(0, 0, 0)
+        .ok_or_else(|| EventixError::ValidationError("Invalid end time".to_string()))?;
+
+    let start_dt = resolve_local(tz, start_naive)
+        .ok_or_else(|| EventixError::ValidationError("Ambiguous start time".to_string()))?;
+    let end_dt = resolve_local(tz, end_naive)
+        .ok_or_else(|| EventixError::ValidationError("Ambiguous end time".to_string()))?;
+
+    Ok((start_dt, end_dt))
+}
+
 /// Convert a datetime from one timezone to another
 ///
 /// # Examples
@@ -100,7 +134,7 @@ pub fn is_dst(dt: &DateTime<Tz>) -> bool {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use chrono::Timelike;
+    use chrono::{Duration, Timelike};
 
     #[test]
     fn test_parse_timezone() {
@@ -128,5 +162,17 @@ mod tests {
 
         // UTC 15:00 should be around 10:00 or 11:00 in NY depending on DST
         assert!(dt_ny.hour() == 10 || dt_ny.hour() == 11);
+    }
+
+    #[test]
+    fn test_local_day_window_dst_fall_back() {
+        let tz = parse_timezone("America/New_York").unwrap();
+        let date = chrono::NaiveDate::from_ymd_opt(2025, 11, 2).unwrap();
+
+        let (start, end) = local_day_window(date, tz).unwrap();
+
+        assert_eq!(start.date_naive(), date);
+        assert_eq!(end.date_naive(), date.succ_opt().unwrap());
+        assert_eq!(end - start, Duration::hours(25));
     }
 }

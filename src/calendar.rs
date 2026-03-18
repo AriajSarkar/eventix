@@ -3,7 +3,9 @@
 use crate::error::{EventixError, Result};
 use crate::event::Event;
 use crate::recurrence::Recurrence;
-use chrono::{DateTime, TimeZone};
+use crate::timezone::local_day_window;
+use crate::views::{DayIterator, WeekIterator};
+use chrono::DateTime;
 use chrono_tz::Tz;
 use rrule::Frequency;
 
@@ -202,26 +204,42 @@ impl Calendar {
 
     /// Get all events occurring on a specific date
     pub fn events_on_date(&self, date: DateTime<Tz>) -> Result<Vec<EventOccurrence<'_>>> {
-        let start = date
-            .date_naive()
-            .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| EventixError::ValidationError("Invalid start time".to_string()))?;
-        let end = date
-            .date_naive()
-            .and_hms_opt(23, 59, 59)
-            .ok_or_else(|| EventixError::ValidationError("Invalid end time".to_string()))?;
-
-        let tz = date.timezone();
-        let start_dt = tz
-            .from_local_datetime(&start)
-            .earliest()
-            .ok_or_else(|| EventixError::ValidationError("Ambiguous start time".to_string()))?;
-        let end_dt = tz
-            .from_local_datetime(&end)
-            .latest()
-            .ok_or_else(|| EventixError::ValidationError("Ambiguous end time".to_string()))?;
-
+        let (start_dt, end_dt) = local_day_window(date.date_naive(), date.timezone())?;
         self.events_between(start_dt, end_dt)
+    }
+
+    /// Create a lazy iterator over calendar days starting from the given date.
+    ///
+    /// Each yielded item is a [`crate::Result`] containing a [`crate::DayView`]
+    /// for the requested local day. Views bucket active occurrences whose time
+    /// span intersects the day, so overnight events appear on every day they
+    /// overlap. The iterator advances one day at a time until the supported
+    /// date range is exhausted.
+    pub fn days(&self, start: DateTime<Tz>) -> DayIterator<'_> {
+        DayIterator::new(self, start)
+    }
+
+    /// Create a lazy iterator over calendar days moving backward in time.
+    ///
+    /// Each yielded item is a [`crate::Result`] containing a [`crate::DayView`].
+    pub fn days_back(&self, start: DateTime<Tz>) -> DayIterator<'_> {
+        DayIterator::backward(self, start)
+    }
+
+    /// Create a lazy iterator over ISO weeks (Monday through Sunday).
+    ///
+    /// The first yielded item is a [`crate::Result`] containing the Monday-Sunday
+    /// week that contains `start`.
+    pub fn weeks(&self, start: DateTime<Tz>) -> WeekIterator<'_> {
+        WeekIterator::new(self, start)
+    }
+
+    /// Create a lazy iterator over ISO weeks moving backward in time.
+    ///
+    /// Each yielded item is a [`crate::Result`] containing a contiguous
+    /// Monday-Sunday block.
+    pub fn weeks_back(&self, start: DateTime<Tz>) -> WeekIterator<'_> {
+        WeekIterator::backward(self, start)
     }
 
     /// Get the number of events in the calendar

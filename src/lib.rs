@@ -10,6 +10,7 @@
 //! - **Exceptions**: Skip specific dates or apply custom filters (e.g., skip weekends)
 //! - **ICS support**: Import and export events using the iCalendar format (RFC 5545 compliant with TZID support)
 //! - **Builder API**: Ergonomic, fluent interface for creating events and calendars
+//! - **Calendar view iterators**: Lazy day/week traversal for UI-friendly calendar rendering
 //! - **Gap validation**: Find gaps between events, detect conflicts, and analyze schedule density
 //! - **Schedule analysis**: Unique features for occupancy metrics, availability finding, and conflict resolution
 //!
@@ -105,11 +106,13 @@
 //! - [`ics`] - ICS (iCalendar) import/export with TZID support
 //! - [`recurrence`] - Recurrence patterns (secondly, minutely, hourly, daily, weekly, monthly, yearly)
 //! - [`timezone`] - Timezone utilities with DST awareness
+//! - [`views`] - Lazy day/week calendar view iterators
 //!
 //! ## Examples
 //!
 //! See the `examples/` directory for more comprehensive examples:
 //! - `basic.rs` - Simple calendar creation and event management
+//! - `calendar_views.rs` - Lazy day and week view iteration for UI rendering
 //! - `recurrence.rs` - All seven RFC 5545 recurrence frequencies with lazy iteration and DST handling
 //! - `ics_export.rs` - ICS import/export functionality
 //! - `timezone_ics_export.rs` - Timezone-aware ICS export demonstration
@@ -121,6 +124,7 @@ pub mod gap_validation;
 pub mod ics;
 pub mod recurrence;
 pub mod timezone;
+pub mod views;
 
 mod error;
 
@@ -128,7 +132,8 @@ pub use calendar::Calendar;
 pub use error::{EventixError, Result};
 pub use event::{Event, EventBuilder, EventStatus};
 pub use recurrence::{OccurrenceIterator, Recurrence};
+pub use views::{DayIterator, DayView, OwnedEventOccurrence, WeekIterator, WeekView};
 
 // Re-export commonly used types from chrono
-pub use chrono::{DateTime, Duration, NaiveDateTime, Utc};
+pub use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, Utc};
 pub use chrono_tz::Tz;
