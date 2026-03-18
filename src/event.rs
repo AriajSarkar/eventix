@@ -735,4 +735,34 @@ mod tests {
             assert_ne!(occ.hour(), 12, "12:00 should be excluded");
         }
     }
+
+    #[test]
+    fn test_occurs_on_true_for_matching_day() {
+        let event = Event::builder()
+            .title("Meeting")
+            .start("2025-11-03 10:00:00", "America/New_York")
+            .duration_hours(1)
+            .build()
+            .unwrap();
+
+        let tz = crate::timezone::parse_timezone("America/New_York").unwrap();
+        let date = crate::timezone::parse_datetime_with_tz("2025-11-03 00:00:00", tz).unwrap();
+
+        assert!(event.occurs_on(date).unwrap());
+    }
+
+    #[test]
+    fn test_occurs_on_false_for_non_matching_day() {
+        let event = Event::builder()
+            .title("Meeting")
+            .start("2025-11-03 10:00:00", "America/New_York")
+            .duration_hours(1)
+            .build()
+            .unwrap();
+
+        let tz = crate::timezone::parse_timezone("America/New_York").unwrap();
+        let date = crate::timezone::parse_datetime_with_tz("2025-11-04 00:00:00", tz).unwrap();
+
+        assert!(!event.occurs_on(date).unwrap());
+    }
 }

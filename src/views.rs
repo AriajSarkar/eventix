@@ -426,10 +426,6 @@ fn remaining_days(date: NaiveDate, direction: Direction) -> usize {
         Direction::Backward => date.signed_duration_since(NaiveDate::MIN).num_days(),
     };
 
-    if remaining < 0 {
-        return 0;
-    }
-
     remaining.try_into().unwrap_or(usize::MAX).saturating_add(1)
 }
 
@@ -754,6 +750,57 @@ mod tests {
         assert!(lower > 0);
         assert_eq!(upper, Some(lower));
         assert_eq!(iter.len(), lower);
+    }
+
+    #[test]
+    fn test_week_view_all_events_is_sorted_across_days() {
+        let mut calendar = Calendar::new("All Events");
+        let tz = timezone::parse_timezone("UTC").unwrap();
+
+        calendar.add_event(
+            Event::builder()
+                .title("Wednesday")
+                .start("2025-11-05 09:00:00", "UTC")
+                .duration_minutes(30)
+                .build()
+                .unwrap(),
+        );
+        calendar.add_event(
+            Event::builder()
+                .title("Monday")
+                .start("2025-11-03 09:00:00", "UTC")
+                .duration_minutes(30)
+                .build()
+                .unwrap(),
+        );
+
+        let start = timezone::parse_datetime_with_tz("2025-11-03 00:00:00", tz).unwrap();
+        let week = next_ok(calendar.weeks(start));
+        let titles: Vec<_> = week.all_events().into_iter().map(|event| event.title()).collect();
+
+        assert_eq!(titles, vec!["Monday", "Wednesday"]);
+    }
+
+    #[test]
+    fn test_end_inclusive_zero_length_window_falls_back_to_start() {
+        let tz = timezone::parse_timezone("UTC").unwrap();
+        let start = timezone::parse_datetime_with_tz("2025-11-01 00:00:00", tz).unwrap();
+        let day = DayView::new(start.date_naive(), tz, start, start, vec![]);
+
+        assert_eq!(day.end_inclusive(), start);
+    }
+
+    #[test]
+    fn test_week_boundary_helpers_are_monday_aligned() {
+        assert_eq!(first_full_week_start().weekday(), chrono::Weekday::Mon);
+        assert_eq!(last_full_week_start().weekday(), chrono::Weekday::Mon);
+        assert!(last_full_week_start().checked_add_days(Days::new(6)).is_some());
+    }
+
+    #[test]
+    fn test_remaining_full_weeks_invalid_start_returns_zero() {
+        let invalid_start = last_full_week_start().succ_opt().unwrap();
+        assert_eq!(remaining_full_weeks(invalid_start, Direction::Forward), 0);
     }
 
     #[test]
