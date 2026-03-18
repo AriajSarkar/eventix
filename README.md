@@ -6,6 +6,7 @@ A high-level calendar and recurrence library for Rust with timezone-aware schedu
 [![Documentation](https://docs.rs/eventix/badge.svg)](https://docs.rs/eventix)
 [![CI](https://github.com/AriajSarkar/eventix/workflows/EventixCI/badge.svg)](https://github.com/AriajSarkar/eventix/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/AriajSarkar/eventix?utm_source=oss&utm_medium=github&utm_campaign=AriajSarkar%2Feventix&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
 ## Features
 
