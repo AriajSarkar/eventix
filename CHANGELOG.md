@@ -13,10 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Calendar views example**: Added `examples/calendar_views.rs` to demonstrate day/week traversal and UI-friendly mapping patterns.
 
 ### Changed
-- **Fallible view iteration**: `DayIterator` and `WeekIterator` now yield `Result<DayView>` / `Result<WeekView>` items instead of silently stopping on expansion errors.
+- **[BREAKING] Fallible view iteration**: `DayIterator` and `WeekIterator` now yield `Result<DayView>` / `Result<WeekView>` items instead of silently stopping on expansion errors.
 - **Week back-navigation**: `WeekIterator::backward()` now yields proper contiguous Monday-Sunday blocks when walking into the past.
-- **Explicit day boundaries**: `DayView::end()` now returns the exclusive next-midnight boundary, with `end_inclusive()` available for display-only scenarios.
-- `Calendar::events_on_date()` and `Event::occurs_on()` now use an exclusive next-day boundary, improving correctness for occurrences that start exactly at midnight boundaries and for DST-length days.
+- **[BREAKING] Explicit day boundaries**: `DayView::end()` now returns the exclusive next-midnight boundary, with `end_inclusive()` available for display-only scenarios.
+- **[BREAKING]** `Calendar::events_on_date()` and `Event::occurs_on()` now use an exclusive next-day boundary, improving correctness for occurrences that start exactly at midnight boundaries and for DST-length days.
 
 ## [0.4.0] - 2026-03-07
 

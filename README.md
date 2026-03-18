@@ -198,7 +198,7 @@ cal.add_event(
     Event::builder()
         .title("Standup")
         .start("2025-11-04 10:00:00", "America/New_York")
-        .duration_minutes(15)
+        .duration(Duration::minutes(15))
         .recurrence(Recurrence::daily().count(10))
         .build()?
 );
