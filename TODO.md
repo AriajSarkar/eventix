@@ -54,3 +54,45 @@ This document outlines the strategic technical direction for the `eventix` crate
 - [x] **Day and Week View Iterators** `(Priority: Medium)`
     - **Feature**: Add lazy `Calendar::days()` / `days_back()` and `Calendar::weeks()` / `weeks_back()` iterators that yield pre-bucketed `DayView` and `WeekView` values.
     - **Use Case**: Lets consumers render personal calendar UIs in frameworks like Yew, Leptos, and Dioxus without eagerly expanding wide date ranges or manually grouping occurrences by day.
+
+## 6. v0.5.1 API Polish
+*Objective: Small additive improvements requested by early users and follow-up review feedback.*
+
+- [ ] **Calendar `FromStr` parsing** `(Priority: Medium)`
+    - **Feature**: Parse ICS data directly from `&str` so callers can load calendar payloads without a temporary file.
+    - **Value**: Useful for tests, embedded fixtures, and API handlers that already have the raw string body.
+
+- [ ] **Streaming ICS import** `(Priority: Medium)`
+    - **Feature**: Add `Calendar::from_ics_reader(impl Read)` for incremental loading from files, sockets, or database-backed readers.
+    - **Value**: Avoids forcing all ICS payloads into memory up front.
+
+- [ ] **DayView date conversions** `(Priority: Low)`
+    - **Feature**: Implement `From<DayView> for NaiveDate` and `From<&DayView> for NaiveDate`.
+    - **Value**: Makes calendar views easier to feed into UI and serialization layers.
+
+- [ ] **Yew ergonomics docs** `(Priority: Low)`
+    - **Feature**: Document the `Rc<DayView>` wrapping pattern for component props.
+    - **Value**: Clarifies the intended usage for UI users without changing runtime behavior.
+
+- [ ] **Optional serde for views** `(Priority: Low)`
+    - **Feature**: Gate `DayView` and `WeekView` serialization behind an opt-in `serde` feature.
+    - **Value**: Helps SSR and persistence consumers without imposing serde on every downstream build.
+
+## 7. v0.6.0 Performance / Bigger Features
+*Objective: Scale out the calendar view layer and import path for heavier workloads.*
+
+- [ ] **K-way merge optimization** `(Priority: Medium)`
+    - **Feature**: Merge per-event occurrence streams instead of materializing every event's range independently.
+    - **Value**: Reduces work when rendering large day/week windows across many recurring events.
+
+- [ ] **Chunked/lazy ICS loading** `(Priority: Low)`
+    - **Feature**: Stream ICS parsing in chunks so enterprise-scale calendars do not need to fit fully in memory.
+    - **Value**: Better for very large imports, long-running services, and database-backed sync pipelines.
+
+- [ ] **Configurable week start** `(Priority: Low)`
+    - **Feature**: Allow Sunday-first calendars for regions that expect that convention.
+    - **Value**: Improves UX for US-style calendar rendering without changing the default ISO behavior.
+
+- [ ] **MonthView / YearView iterators** `(Priority: Low)`
+    - **Feature**: Extend the lazy view model beyond day/week traversal.
+    - **Value**: Useful for full calendar grids and high-level overview screens.

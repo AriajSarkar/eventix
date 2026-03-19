@@ -65,10 +65,10 @@ pub(crate) fn resolve_local(tz: Tz, naive: NaiveDateTime) -> Option<DateTime<Tz>
         return Some(dt);
     }
 
-    let day_before = naive - chrono::Duration::days(1);
+    let day_before = naive.checked_sub_signed(chrono::Duration::days(1))?;
     let pre_gap_dt = tz.from_local_datetime(&day_before).earliest()?;
     let pre_offset = pre_gap_dt.offset().fix();
-    let utc_naive = naive - pre_offset;
+    let utc_naive = naive.checked_sub_offset(pre_offset)?;
     Some(chrono::Utc.from_utc_datetime(&utc_naive).with_timezone(&tz))
 }
 
@@ -174,5 +174,19 @@ mod tests {
         assert_eq!(start.date_naive(), date);
         assert_eq!(end.date_naive(), date.succ_opt().unwrap());
         assert_eq!(end - start, Duration::hours(25));
+    }
+
+    #[test]
+    fn test_resolve_local_dst_gap_uses_pre_gap_offset() {
+        let tz = parse_timezone("America/New_York").unwrap();
+        let naive = chrono::NaiveDate::from_ymd_opt(2025, 3, 9)
+            .unwrap()
+            .and_hms_opt(2, 30, 0)
+            .unwrap();
+
+        let resolved = resolve_local(tz, naive).unwrap();
+
+        assert_eq!(resolved.hour(), 3);
+        assert_eq!(resolved.minute(), 30);
     }
 }
