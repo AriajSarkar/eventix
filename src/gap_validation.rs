@@ -181,14 +181,19 @@ pub fn find_gaps(
 
     let mut gaps = Vec::new();
     let mut current_time = start;
+    let mut last_event_title: Option<String> = None;
 
     for occurrence in occurrences.iter() {
         let event_start = occurrence.occurrence_time;
 
         // Check if there's a gap before this event
         if event_start > current_time {
-            let gap =
-                TimeGap::new(current_time, event_start, None, Some(occurrence.title().to_string()));
+            let gap = TimeGap::new(
+                current_time,
+                event_start,
+                last_event_title.clone(),
+                Some(occurrence.title().to_string()),
+            );
 
             if gap.duration >= min_gap_duration {
                 gaps.push(gap);
@@ -199,12 +204,13 @@ pub fn find_gaps(
         let event_end = occurrence.end_time();
         if event_end > current_time {
             current_time = event_end;
+            last_event_title = Some(occurrence.title().to_string());
         }
     }
 
     // Check for gap at the end
     if end > current_time {
-        let gap = TimeGap::new(current_time, end, None, None);
+        let gap = TimeGap::new(current_time, end, last_event_title, None);
         if gap.duration >= min_gap_duration {
             gaps.push(gap);
         }
