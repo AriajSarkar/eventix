@@ -100,6 +100,11 @@ impl Event {
         end: DateTime<Tz>,
         max_occurrences: usize,
     ) -> Result<Vec<DateTime<Tz>>> {
+        if start > end {
+            return Err(crate::error::EventixError::ValidationError(
+                "Start time must be before or equal to end time".to_string(),
+            ));
+        }
         if max_occurrences == 0 {
             return Ok(vec![]);
         }
@@ -511,7 +516,10 @@ mod tests {
     #[test]
     fn test_event_validation() {
         // Missing title
-        let result = Event::builder().start("2025-11-01 10:00:00", "UTC").duration_hours(1).build();
+        let result = Event::builder()
+            .start("2025-11-01 10:00:00", "UTC")
+            .duration_hours(1)
+            .build();
         assert!(result.is_err());
 
         // End before start
@@ -685,7 +693,11 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         // Should surface the real timezone error, not "Start time is required"
-        assert!(!err.contains("required"), "Expected timezone parse error, got: {}", err);
+        assert!(
+            !err.contains("required"),
+            "Expected timezone parse error, got: {}",
+            err
+        );
     }
 
     #[test]
@@ -697,7 +709,11 @@ mod tests {
             .build();
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(!err.contains("required"), "Expected datetime parse error, got: {}", err);
+        assert!(
+            !err.contains("required"),
+            "Expected datetime parse error, got: {}",
+            err
+        );
     }
 
     #[test]
@@ -728,7 +744,9 @@ mod tests {
             occs.len(),
             4,
             "exdate should skip only the 12:00 occurrence, got: {:?}",
-            occs.iter().map(|d| d.format("%H:%M").to_string()).collect::<Vec<_>>()
+            occs.iter()
+                .map(|d| d.format("%H:%M").to_string())
+                .collect::<Vec<_>>()
         );
         // Verify 12:00 is not in the list
         for occ in &occs {

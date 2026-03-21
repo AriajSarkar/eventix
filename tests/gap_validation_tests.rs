@@ -39,7 +39,10 @@ fn test_comprehensive_gap_detection() {
 
     // Verify gap durations
     for gap in &gaps {
-        assert!(gap.duration_minutes() >= 30, "Each gap should be at least 30 minutes");
+        assert!(
+            gap.duration_minutes() >= 30,
+            "Each gap should be at least 30 minutes"
+        );
     }
 }
 
@@ -84,8 +87,14 @@ fn test_overlap_detection_complex() {
 
     // Verify overlap details
     for overlap in &overlaps {
-        assert!(overlap.event_count() >= 2, "Each overlap should involve at least 2 events");
-        assert!(overlap.duration_minutes() > 0, "Overlap should have positive duration");
+        assert!(
+            overlap.event_count() >= 2,
+            "Each overlap should involve at least 2 events"
+        );
+        assert!(
+            overlap.duration_minutes() > 0,
+            "Overlap should have positive duration"
+        );
     }
 }
 
@@ -132,7 +141,10 @@ fn test_schedule_density_analysis() {
     let light_density = gap_validation::calculate_density(&light_cal, start, end).unwrap();
     let busy_density = gap_validation::calculate_density(&busy_cal, start, end).unwrap();
 
-    assert!(light_density.is_light(), "Light schedule should be detected");
+    assert!(
+        light_density.is_light(),
+        "Light schedule should be detected"
+    );
     assert!(busy_density.is_busy(), "Busy schedule should be detected");
     assert!(busy_density.occupancy_percentage > light_density.occupancy_percentage);
 }
@@ -171,7 +183,10 @@ fn test_find_available_slots_for_meeting() {
 
     // Verify all slots are long enough
     for slot in slots {
-        assert!(slot.duration >= Duration::hours(2), "Each slot should fit 2-hour meeting");
+        assert!(
+            slot.duration >= Duration::hours(2),
+            "Each slot should fit 2-hour meeting"
+        );
     }
 }
 
@@ -270,7 +285,10 @@ fn test_longest_gap_finder() {
     let gap = longest_gap.unwrap();
 
     // The gap between 9:30 and 16:00 should be the longest (6.5 hours)
-    assert!(gap.duration_hours() >= 6, "Longest gap should be at least 6 hours");
+    assert!(
+        gap.duration_hours() >= 6,
+        "Longest gap should be at least 6 hours"
+    );
 }
 
 #[test]
@@ -382,7 +400,10 @@ fn test_density_metrics_comprehensive() {
         (density.occupancy_percentage - 30.0).abs() < 1.0,
         "Should be approximately 30% occupied"
     );
-    assert!(density.free_duration > density.busy_duration, "Should have more free time");
+    assert!(
+        density.free_duration > density.busy_duration,
+        "Should have more free time"
+    );
     assert!(!density.has_conflicts(), "Should have no conflicts");
     // 30% is right at the boundary - not considered "light" (which is <30%)
     assert!(!density.is_busy(), "Should not be considered busy");
@@ -503,7 +524,10 @@ fn test_overlaps_sweep_line_performance() {
     let overlaps = gap_validation::find_overlaps(&cal, start, end).unwrap();
 
     // 100 events % 28 days = ~3-4 events per day at same time = overlaps expected
-    assert!(overlaps.len() > 0, "Should detect overlaps on same-day events");
+    assert!(
+        overlaps.len() > 0,
+        "Should detect overlaps on same-day events"
+    );
 }
 
 #[test]
@@ -564,5 +588,208 @@ fn test_zero_duration_events_no_false_overlaps() {
     let overlaps = gap_validation::find_overlaps(&cal, start, end).unwrap();
 
     // Zero-duration imported events should be ignored, leaving no false overlaps.
-    assert_eq!(overlaps.len(), 0, "Zero-duration events should not produce false overlaps");
+    assert_eq!(
+        overlaps.len(),
+        0,
+        "Zero-duration events should not produce false overlaps"
+    );
+}
+
+#[test]
+fn test_density_with_overlapping_events() {
+    // CRITICAL: This test catches the double-counting bug where overlapping
+    // events inflate busy_duration beyond total_duration, making free_duration negative.
+    let mut cal = Calendar::new("Overlapping Density");
+
+    // Event A: 09:00 - 11:00 (2h)
+    cal.add_event(
+        Event::builder()
+            .title("Event A")
+            .start("2025-11-01 09:00:00", "UTC")
+            .duration_hours(2)
+            .build()
+            .unwrap(),
+    );
+
+    // Event B: 10:00 - 12:00 (2h, overlaps A by 1 hour)
+    cal.add_event(
+        Event::builder()
+            .title("Event B")
+            .start("2025-11-01 10:00:00", "UTC")
+            .duration_hours(2)
+            .build()
+            .unwrap(),
+    );
+
+    // Event C: 14:00 - 16:00 (2h, separate)
+    cal.add_event(
+        Event::builder()
+            .title("Event C")
+            .start("2025-11-01 14:00:00", "UTC")
+            .duration_hours(2)
+            .build()
+            .unwrap(),
+    );
+
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let start = timezone::parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
+    let end = timezone::parse_datetime_with_tz("2025-11-01 18:00:00", tz).unwrap();
+
+    let density = gap_validation::calculate_density(&cal, start, end).unwrap();
+
+    // Merged busy: 09:00-12:00 (3h) + 14:00-16:00 (2h) = 5h wall-clock busy
+    // Total: 10h, so 50% occupancy
+    let busy_secs = density.busy_duration.num_seconds();
+    let free_secs = density.free_duration.num_seconds();
+    let total_secs = density.total_duration.num_seconds();
+
+    assert_eq!(
+        busy_secs + free_secs,
+        total_secs,
+        "busy ({}) + free ({}) must equal total ({})",
+        busy_secs,
+        free_secs,
+        total_secs
+    );
+    assert!(
+        free_secs >= 0,
+        "free_duration must never be negative, got {}s",
+        free_secs
+    );
+    assert!(
+        density.occupancy_percentage <= 100.0,
+        "occupancy must not exceed 100%, got {:.2}%",
+        density.occupancy_percentage
+    );
+    assert!(
+        (density.occupancy_percentage - 50.0).abs() < 1.0,
+        "expected ~50%, got {:.2}%",
+        density.occupancy_percentage
+    );
+    assert_eq!(density.overlap_count, 1, "should detect the overlap");
+}
+
+#[test]
+fn test_density_fully_contained_event_not_double_counted() {
+    // Event B is fully inside Event A — should not add any extra busy time
+    let mut cal = Calendar::new("Contained");
+
+    // Event A: 09:00 - 17:00 (8h)
+    cal.add_event(
+        Event::builder()
+            .title("All Day Block")
+            .start("2025-11-01 09:00:00", "UTC")
+            .duration_hours(8)
+            .build()
+            .unwrap(),
+    );
+
+    // Event B: 10:00 - 11:00 (1h, fully inside A)
+    cal.add_event(
+        Event::builder()
+            .title("Nested Meeting")
+            .start("2025-11-01 10:00:00", "UTC")
+            .duration_hours(1)
+            .build()
+            .unwrap(),
+    );
+
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let start = timezone::parse_datetime_with_tz("2025-11-01 08:00:00", tz).unwrap();
+    let end = timezone::parse_datetime_with_tz("2025-11-01 18:00:00", tz).unwrap();
+
+    let density = gap_validation::calculate_density(&cal, start, end).unwrap();
+
+    // Busy = 8h (just Event A, B is fully contained), Total = 10h -> 80%
+    assert_eq!(
+        density.busy_duration.num_hours(),
+        8,
+        "Fully contained event should not add extra busy time"
+    );
+    assert!(
+        density.free_duration.num_seconds() >= 0,
+        "free_duration must never be negative"
+    );
+}
+
+#[test]
+fn test_gap_validation_invalid_time_range() {
+    let cal = Calendar::new("Invalid Range");
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let start = timezone::parse_datetime_with_tz("2025-11-01 12:00:00", tz).unwrap();
+    let end = timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+
+    // start > end is an invalid range that must be explicitly rejected with an error
+    let gaps = gap_validation::find_gaps(&cal, start, end, Duration::minutes(0));
+    assert!(gaps.is_err(), "Should return error for invalid range");
+
+    let overlaps = gap_validation::find_overlaps(&cal, start, end);
+    assert!(overlaps.is_err(), "Should return error for invalid range");
+
+    let density = gap_validation::calculate_density(&cal, start, end);
+    assert!(density.is_err(), "Should return error for invalid range");
+}
+
+#[test]
+fn test_calculate_density_zero_range() {
+    let cal = Calendar::new("Zero Range");
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let start = timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+    let end = start;
+
+    // start == end is a zero-duration range that must be explicitly rejected
+    let density = gap_validation::calculate_density(&cal, start, end);
+    assert!(
+        density.is_err(),
+        "Zero range should be rejected by validation"
+    );
+}
+
+#[test]
+fn test_suggest_alternatives_impossible_duration() {
+    let cal = Calendar::new("Impossible Alt");
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let req = timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+
+    // Zero duration must fail
+    let zero_dur =
+        gap_validation::suggest_alternatives(&cal, req, Duration::minutes(0), Duration::hours(1));
+    assert!(zero_dur.is_err());
+
+    // Requesting a 10-hour duration in a 2-hour search window
+    let alternatives =
+        gap_validation::suggest_alternatives(&cal, req, Duration::hours(10), Duration::hours(1))
+            .unwrap();
+    assert_eq!(
+        alternatives.len(),
+        0,
+        "Should not return alternatives if duration exceeds window"
+    );
+}
+
+#[test]
+fn test_suggest_alternatives_empty_calendar() {
+    let cal = Calendar::new("Empty Cal");
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let req = timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+
+    let alternatives =
+        gap_validation::suggest_alternatives(&cal, req, Duration::hours(1), Duration::hours(2))
+            .unwrap();
+    assert!(
+        alternatives.len() >= 4,
+        "Should suggest multiple slots in empty calendar"
+    );
+}
+
+#[test]
+fn test_is_slot_available_invalid_time_range() {
+    let cal = Calendar::new("Invalid Slot Range");
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    // slot_start > slot_end is an invalid slot and must be explicitly rejected
+    let slot_start = timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+    let slot_end = timezone::parse_datetime_with_tz("2025-11-01 09:00:00", tz).unwrap();
+
+    let available = gap_validation::is_slot_available(&cal, slot_start, slot_end);
+    assert!(available.is_err(), "Invalid slot is gracefully rejected");
 }

@@ -182,6 +182,12 @@ impl Calendar {
         end: DateTime<Tz>,
         max_per_event: usize,
     ) -> Result<Vec<EventOccurrence<'_>>> {
+        if start > end {
+            return Err(crate::error::EventixError::ValidationError(
+                "Start time must be before or equal to end time".to_string(),
+            ));
+        }
+
         let mut occurrences = Vec::new();
 
         for (index, event) in self.events.iter().enumerate() {
@@ -304,7 +310,9 @@ impl Calendar {
 
         let description = value["description"].as_str().map(|s| s.to_string());
 
-        let timezone = value["timezone"].as_str().and_then(|tz_str| parse_timezone(tz_str).ok());
+        let timezone = value["timezone"]
+            .as_str()
+            .and_then(|tz_str| parse_timezone(tz_str).ok());
 
         let mut calendar = Calendar {
             name,
@@ -352,7 +360,9 @@ impl Calendar {
                     attendees: event_val["attendees"]
                         .as_array()
                         .map(|arr| {
-                            arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+                            arr.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect()
                         })
                         .unwrap_or_default(),
                     recurrence: match event_val.get("recurrence") {
@@ -480,11 +490,19 @@ fn json_to_recurrence(val: &serde_json::Value, tz: Tz) -> crate::error::Result<R
         "weekly" => Frequency::Weekly,
         "monthly" => Frequency::Monthly,
         "yearly" => Frequency::Yearly,
-        _ => return Err(EventixError::Other(format!("Unknown frequency: {}", freq_str))),
+        _ => {
+            return Err(EventixError::Other(format!(
+                "Unknown frequency: {}",
+                freq_str
+            )))
+        }
     };
     let interval_raw = val["interval"].as_u64().unwrap_or(1);
     let interval = u16::try_from(interval_raw).map_err(|_| {
-        EventixError::Other(format!("Recurrence interval {} exceeds u16::MAX", interval_raw))
+        EventixError::Other(format!(
+            "Recurrence interval {} exceeds u16::MAX",
+            interval_raw
+        ))
     })?;
 
     // RFC 5545: COUNT and UNTIL must not both be present
@@ -647,7 +665,10 @@ mod tests {
 
         let json = cal.to_json().unwrap();
         // Verify recurrence and exdates are in the JSON
-        assert!(json.contains("\"frequency\""), "JSON should contain recurrence frequency");
+        assert!(
+            json.contains("\"frequency\""),
+            "JSON should contain recurrence frequency"
+        );
         assert!(json.contains("\"exdates\""), "JSON should contain exdates");
 
         let restored = Calendar::from_json(&json).unwrap();
@@ -675,7 +696,10 @@ mod tests {
             }]
         }"#;
         let result = Calendar::from_json(json);
-        assert!(result.is_err(), "Should reject unknown recurrence frequency");
+        assert!(
+            result.is_err(),
+            "Should reject unknown recurrence frequency"
+        );
     }
 
     #[test]
@@ -726,5 +750,17 @@ mod tests {
         }"#;
         let result = Calendar::from_json(json);
         assert!(result.is_err(), "Should reject both count and until");
+    }
+    #[test]
+    fn test_events_between_invalid_range() {
+        use crate::timezone::parse_datetime_with_tz;
+        use crate::timezone::parse_timezone;
+        let cal = Calendar::new("Test");
+        let tz = parse_timezone("UTC").unwrap();
+        let start = parse_datetime_with_tz("2025-11-01 12:00:00", tz).unwrap();
+        let end = parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+
+        let result = cal.events_between(start, end);
+        assert!(result.is_err());
     }
 }
