@@ -161,8 +161,8 @@ proptest! {
         num_events in 0usize..10,
         event_duration_mins in 15i64..60
     ) {
-        // INVARIANT: For NON-OVERLAPPING events, occupancy_percentage is 0.0 <= x <= 100.0
-        // Note: With overlapping events, occupancy CAN exceed 100% (over-booking)
+        // INVARIANT: occupancy_percentage is always 0.0 <= x <= 100.0
+        // (overlapping intervals are merged before summing busy time)
         let mut cal = Calendar::new("Percentage Test");
         let tz = timezone::parse_timezone("UTC").unwrap();
         let base = tz.with_ymd_and_hms(2025, 3, 1, 0, 0, 0).unwrap();
@@ -277,6 +277,59 @@ proptest! {
         prop_assert_eq!(gaps[0].start, start);
         prop_assert_eq!(gaps[0].end, end);
         prop_assert_eq!(gaps[0].duration_minutes(), window_hours * 60);
+    }
+    #[test]
+    fn test_density_invariant_with_overlapping_events(
+        num_events in 2usize..8,
+        window_hours in 8i64..24
+    ) {
+        // INVARIANT: busy + free = total, even with overlapping events.
+        // This catches the double-counting bug where overlapping intervals
+        // inflated busy_duration beyond total_duration.
+        let mut cal = Calendar::new("Overlap Density");
+        let tz = timezone::parse_timezone("UTC").unwrap();
+        let base = tz.with_ymd_and_hms(2025, 8, 1, 8, 0, 0).unwrap();
+
+        // Create events that WILL overlap: 2-hour events spaced 1 hour apart
+        for i in 0..num_events {
+            let event = Event::builder()
+                .title(format!("Overlap {}", i))
+                .start_datetime(base + Duration::hours(i as i64))
+                .duration_hours(2)
+                .build()
+                .unwrap();
+            cal.add_event(event);
+        }
+
+        let start = base;
+        let end = base + Duration::hours(window_hours);
+        let density = gap_validation::calculate_density(&cal, start, end).unwrap();
+
+        let busy_secs = density.busy_duration.num_seconds();
+        let free_secs = density.free_duration.num_seconds();
+        let total_secs = density.total_duration.num_seconds();
+
+        // Core invariant: busy + free = total
+        prop_assert_eq!(
+            busy_secs + free_secs,
+            total_secs,
+            "busy ({}) + free ({}) should equal total ({})",
+            busy_secs, free_secs, total_secs
+        );
+
+        // free_duration must never be negative
+        prop_assert!(
+            free_secs >= 0,
+            "free_duration must not be negative, got {}",
+            free_secs
+        );
+
+        // occupancy must not exceed 100%
+        prop_assert!(
+            density.occupancy_percentage <= 100.0,
+            "occupancy must not exceed 100%, got {:.2}%",
+            density.occupancy_percentage
+        );
     }
     // END: Gap Validation Property Tests
 }

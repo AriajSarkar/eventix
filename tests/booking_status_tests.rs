@@ -135,7 +135,10 @@ fn test_gap_validation_ignores_cancelled_events() {
         .iter()
         .find(|gap| gap.start == cancelled_slot_start && gap.end == cancelled_slot_end);
 
-    assert!(cancelled_slot_gap.is_some(), "Should find a gap where the cancelled event is");
+    assert!(
+        cancelled_slot_gap.is_some(),
+        "Should find a gap where the cancelled event is"
+    );
 }
 
 #[test]

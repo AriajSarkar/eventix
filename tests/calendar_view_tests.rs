@@ -150,7 +150,11 @@ fn test_backward_weeks_are_contiguous_monday_to_sunday_windows() {
     let weeks = collect_ok(calendar.weeks_back(start).take(2));
 
     assert_eq!(
-        weeks[0].days().iter().map(|day| day.date().to_string()).collect::<Vec<_>>(),
+        weeks[0]
+            .days()
+            .iter()
+            .map(|day| day.date().to_string())
+            .collect::<Vec<_>>(),
         vec![
             "2025-11-10".to_string(),
             "2025-11-11".to_string(),

@@ -399,7 +399,10 @@ fn extract_datetime_with_tz(ical_event: &IEvent, prop_name: &str) -> Result<(Dat
         }
     }
 
-    Err(EventixError::IcsError(format!("Property {} not found", prop_name)))
+    Err(EventixError::IcsError(format!(
+        "Property {} not found",
+        prop_name
+    )))
 }
 
 /// Parse an iCalendar datetime value string
@@ -442,7 +445,10 @@ fn parse_ical_datetime_value(dt_str: &str, tz: Tz) -> Result<DateTime<Tz>> {
             .map_err(|_| EventixError::DateTimeParse(format!("Invalid second in: {}", dt_str)))?;
         (year, month, day, hour, minute, second)
     } else {
-        return Err(EventixError::DateTimeParse(format!("Invalid datetime format: {}", dt_str)));
+        return Err(EventixError::DateTimeParse(format!(
+            "Invalid datetime format: {}",
+            dt_str
+        )));
     };
 
     let naive = chrono::NaiveDate::from_ymd_opt(year, month, day)
@@ -581,7 +587,11 @@ mod tests {
         let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=1MO", start);
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        assert!(err_msg.contains("1MO"), "Error should mention the token: {}", err_msg);
+        assert!(
+            err_msg.contains("1MO"),
+            "Error should mention the token: {}",
+            err_msg
+        );
 
         let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=-1FR", start);
         assert!(result.is_err());

@@ -227,11 +227,21 @@ pub struct DayIterator<'a> {
 
 impl<'a> DayIterator<'a> {
     pub(crate) fn new(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Forward)
+        Self::from_date(
+            calendar,
+            start.date_naive(),
+            start.timezone(),
+            Direction::Forward,
+        )
     }
 
     pub(crate) fn backward(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Backward)
+        Self::from_date(
+            calendar,
+            start.date_naive(),
+            start.timezone(),
+            Direction::Backward,
+        )
     }
 
     fn from_date(
@@ -268,15 +278,19 @@ impl Iterator for DayIterator<'_> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining =
-            self.current_date.map(|date| remaining_days(date, self.direction)).unwrap_or(0);
+        let remaining = self
+            .current_date
+            .map(|date| remaining_days(date, self.direction))
+            .unwrap_or(0);
         (remaining, Some(remaining))
     }
 }
 
 impl ExactSizeIterator for DayIterator<'_> {
     fn len(&self) -> usize {
-        self.current_date.map(|date| remaining_days(date, self.direction)).unwrap_or(0)
+        self.current_date
+            .map(|date| remaining_days(date, self.direction))
+            .unwrap_or(0)
     }
 }
 
@@ -293,11 +307,21 @@ pub struct WeekIterator<'a> {
 
 impl<'a> WeekIterator<'a> {
     pub(crate) fn new(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Forward)
+        Self::from_date(
+            calendar,
+            start.date_naive(),
+            start.timezone(),
+            Direction::Forward,
+        )
     }
 
     pub(crate) fn backward(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Backward)
+        Self::from_date(
+            calendar,
+            start.date_naive(),
+            start.timezone(),
+            Direction::Backward,
+        )
     }
 
     fn from_date(
@@ -431,15 +455,23 @@ fn remaining_days(date: NaiveDate, direction: Direction) -> usize {
 
 fn remaining_full_weeks(week_start: NaiveDate, direction: Direction) -> usize {
     let remaining = match direction {
-        Direction::Forward => last_full_week_start().signed_duration_since(week_start).num_days(),
-        Direction::Backward => week_start.signed_duration_since(first_full_week_start()).num_days(),
+        Direction::Forward => last_full_week_start()
+            .signed_duration_since(week_start)
+            .num_days(),
+        Direction::Backward => week_start
+            .signed_duration_since(first_full_week_start())
+            .num_days(),
     };
 
     if remaining < 0 {
         return 0;
     }
 
-    remaining.try_into().unwrap_or(usize::MAX).saturating_div(7).saturating_add(1)
+    remaining
+        .try_into()
+        .unwrap_or(usize::MAX)
+        .saturating_div(7)
+        .saturating_add(1)
 }
 
 fn first_full_week_start() -> NaiveDate {
@@ -450,8 +482,9 @@ fn first_full_week_start() -> NaiveDate {
 }
 
 fn last_full_week_start() -> NaiveDate {
-    let latest_start_candidate =
-        NaiveDate::MAX.checked_sub_days(Days::new(6)).unwrap_or(NaiveDate::MAX);
+    let latest_start_candidate = NaiveDate::MAX
+        .checked_sub_days(Days::new(6))
+        .unwrap_or(NaiveDate::MAX);
     align_to_monday(latest_start_candidate).unwrap_or(latest_start_candidate)
 }
 
@@ -591,8 +624,14 @@ mod tests {
 
         let week = next_ok(calendar.weeks(start));
 
-        assert_eq!(week.start_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 3).unwrap());
-        assert_eq!(week.end_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 9).unwrap());
+        assert_eq!(
+            week.start_date(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 3).unwrap()
+        );
+        assert_eq!(
+            week.end_date(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 9).unwrap()
+        );
         assert_eq!(week.days().len(), 7);
     }
 
@@ -621,7 +660,10 @@ mod tests {
         assert_eq!(occurrence.description(), Some("Weekly planning"));
         assert_eq!(occurrence.location.as_deref(), Some("Room A"));
         assert_eq!(occurrence.status, EventStatus::Confirmed);
-        assert_eq!(occurrence.end_time(), occurrence.occurrence_time + Duration::hours(1));
+        assert_eq!(
+            occurrence.end_time(),
+            occurrence.occurrence_time + Duration::hours(1)
+        );
     }
 
     #[test]
@@ -632,7 +674,10 @@ mod tests {
 
         let day = next_ok(calendar.days(start));
 
-        assert_eq!(day.date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 4).unwrap());
+        assert_eq!(
+            day.date(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 4).unwrap()
+        );
         assert_eq!(day.timezone(), tz);
         assert_eq!(day.event_count(), 1);
         assert!(!day.is_empty());
@@ -652,7 +697,10 @@ mod tests {
         let day = next_ok(calendar.days(start));
 
         assert_eq!(day.event_count(), 1);
-        assert!(day.events().iter().all(|event| event.status != EventStatus::Cancelled));
+        assert!(day
+            .events()
+            .iter()
+            .all(|event| event.status != EventStatus::Cancelled));
     }
 
     #[test]
@@ -663,10 +711,20 @@ mod tests {
 
         let weeks = collect_ok(calendar.weeks_back(start).take(2));
 
-        assert_eq!(weeks[0].start_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 10).unwrap());
-        assert_eq!(weeks[1].start_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 3).unwrap());
         assert_eq!(
-            weeks[0].days().iter().map(DayView::date).collect::<Vec<_>>(),
+            weeks[0].start_date(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 10).unwrap()
+        );
+        assert_eq!(
+            weeks[1].start_date(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 3).unwrap()
+        );
+        assert_eq!(
+            weeks[0]
+                .days()
+                .iter()
+                .map(DayView::date)
+                .collect::<Vec<_>>(),
             vec![
                 chrono::NaiveDate::from_ymd_opt(2025, 11, 10).unwrap(),
                 chrono::NaiveDate::from_ymd_opt(2025, 11, 11).unwrap(),
@@ -719,7 +777,10 @@ mod tests {
         iter.skip_to(chrono::NaiveDate::from_ymd_opt(2025, 11, 5).unwrap());
         let day = next_ok(iter);
 
-        assert_eq!(day.date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 5).unwrap());
+        assert_eq!(
+            day.date(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 5).unwrap()
+        );
     }
 
     #[test]
@@ -736,7 +797,10 @@ mod tests {
 
         iter.skip_to(chrono::NaiveDate::from_ymd_opt(2025, 11, 17).unwrap());
         let week = next_ok(iter);
-        assert_eq!(week.start_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 17).unwrap());
+        assert_eq!(
+            week.start_date(),
+            chrono::NaiveDate::from_ymd_opt(2025, 11, 17).unwrap()
+        );
     }
 
     #[test]
@@ -776,7 +840,11 @@ mod tests {
 
         let start = timezone::parse_datetime_with_tz("2025-11-03 00:00:00", tz).unwrap();
         let week = next_ok(calendar.weeks(start));
-        let titles: Vec<_> = week.all_events().into_iter().map(|event| event.title()).collect();
+        let titles: Vec<_> = week
+            .all_events()
+            .into_iter()
+            .map(|event| event.title())
+            .collect();
 
         assert_eq!(titles, vec!["Monday", "Wednesday"]);
     }
@@ -794,7 +862,9 @@ mod tests {
     fn test_week_boundary_helpers_are_monday_aligned() {
         assert_eq!(first_full_week_start().weekday(), chrono::Weekday::Mon);
         assert_eq!(last_full_week_start().weekday(), chrono::Weekday::Mon);
-        assert!(last_full_week_start().checked_add_days(Days::new(6)).is_some());
+        assert!(last_full_week_start()
+            .checked_add_days(Days::new(6))
+            .is_some());
     }
 
     #[test]

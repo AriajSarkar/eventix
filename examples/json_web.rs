@@ -63,7 +63,11 @@ fn main() -> anyhow::Result<()> {
     "#;
 
     let imported = Calendar::from_json(from_web)?;
-    println!("Imported: '{}' with {} event(s)", imported.name, imported.event_count());
+    println!(
+        "Imported: '{}' with {} event(s)",
+        imported.name,
+        imported.event_count()
+    );
 
     // ─────────────────────────────────────────────
     // 4. BUILD API RESPONSE (using serde_json::json!)
