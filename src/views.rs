@@ -229,24 +229,20 @@ pub struct DayIterator<'a> {
 
 impl<'a> DayIterator<'a> {
     pub(crate) fn new(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Forward)
+        Self {
+            calendar,
+            current_date: Some(start.date_naive()),
+            timezone: start.timezone(),
+            direction: Direction::Forward,
+        }
     }
 
     pub(crate) fn backward(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Backward)
-    }
-
-    fn from_date(
-        calendar: &'a Calendar,
-        date: NaiveDate,
-        timezone: Tz,
-        direction: Direction,
-    ) -> Self {
         Self {
             calendar,
-            current_date: Some(date),
-            timezone,
-            direction,
+            current_date: Some(start.date_naive()),
+            timezone: start.timezone(),
+            direction: Direction::Backward,
         }
     }
 
