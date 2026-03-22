@@ -1,6 +1,10 @@
 #![allow(clippy::unwrap_used)]
 
-use eventix::{timezone, Calendar, Duration, Event, EventStatus, Recurrence};
+mod common;
+
+use common::parse;
+use eventix::{timezone, Calendar, Duration, Event, EventStatus, EventixError, Recurrence};
+use serde_json::json;
 
 fn collect_ok<T>(iter: impl Iterator<Item = eventix::Result<T>>) -> Vec<T> {
     iter.collect::<eventix::Result<Vec<_>>>().unwrap()
@@ -150,11 +154,7 @@ fn test_backward_weeks_are_contiguous_monday_to_sunday_windows() {
     let weeks = collect_ok(calendar.weeks_back(start).take(2));
 
     assert_eq!(
-        weeks[0]
-            .days()
-            .iter()
-            .map(|day| day.date().to_string())
-            .collect::<Vec<_>>(),
+        weeks[0].days().iter().map(|day| day.date().to_string()).collect::<Vec<_>>(),
         vec![
             "2025-11-10".to_string(),
             "2025-11-11".to_string(),
@@ -166,4 +166,102 @@ fn test_backward_weeks_are_contiguous_monday_to_sunday_windows() {
         ]
     );
     assert_eq!(weeks[1].start_date().to_string(), "2025-11-03");
+}
+
+fn sample_event(title: &str, datetime: &str, tz_name: &str) -> Event {
+    Event::builder()
+        .title(title)
+        .start(datetime, tz_name)
+        .duration_hours(1)
+        .build()
+        .unwrap()
+}
+
+#[test]
+fn test_calendar_mutators_and_occurrence_helpers() {
+    let tz = timezone::parse_timezone("America/New_York").unwrap();
+    let mut calendar =
+        Calendar::new("Coverage Calendar").description("Calendar metadata").timezone(tz);
+
+    let planning = Event::builder()
+        .title("Planning")
+        .description("Detailed planning session")
+        .start("2025-11-01 09:00:00", "America/New_York")
+        .duration_hours(1)
+        .build()
+        .unwrap();
+    let review = sample_event("Review", "2025-11-01 11:00:00", "America/New_York");
+
+    calendar.add_events(vec![planning, review]);
+
+    assert_eq!(calendar.timezone, Some(tz));
+    assert_eq!(calendar.event_count(), 2);
+
+    let removed = calendar.remove_event(1).unwrap();
+    assert_eq!(removed.title, "Review");
+    assert!(calendar.remove_event(99).is_none());
+
+    let day = parse("2025-11-01 00:00:00", "America/New_York");
+    let occurrences = calendar.events_on_date(day).unwrap();
+    assert_eq!(occurrences.len(), 1);
+    assert_eq!(occurrences[0].title(), "Planning");
+    assert_eq!(occurrences[0].description(), Some("Detailed planning session"));
+    assert_eq!(occurrences[0].end_time(), parse("2025-11-01 10:00:00", "America/New_York"));
+
+    calendar.clear_events();
+    assert_eq!(calendar.event_count(), 0);
+}
+
+#[test]
+fn test_calendar_from_json_reports_missing_event_fields() {
+    let base = json!({
+        "name": "Broken Calendar",
+        "events": [{
+            "title": "Meeting",
+            "start_time": "2025-11-01T10:00:00+00:00",
+            "end_time": "2025-11-01T11:00:00+00:00",
+            "timezone": "UTC"
+        }]
+    });
+
+    for (field, needle) in [
+        ("title", "Event missing 'title'"),
+        ("start_time", "Event missing 'start_time'"),
+        ("end_time", "Event missing 'end_time'"),
+        ("timezone", "Event missing 'timezone'"),
+    ] {
+        let mut payload = base.clone();
+        payload["events"].as_array_mut().unwrap()[0]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+
+        let err = Calendar::from_json(&payload.to_string()).unwrap_err();
+        assert!(matches!(err, EventixError::Other(message) if message.contains(needle)));
+    }
+}
+
+#[test]
+fn test_calendar_from_json_rejects_invalid_exdates_and_status() {
+    let mut exdate_payload = json!({
+        "name": "Broken Calendar",
+        "events": [{
+            "title": "Meeting",
+            "start_time": "2025-11-01T10:00:00+00:00",
+            "end_time": "2025-11-01T11:00:00+00:00",
+            "timezone": "UTC",
+            "exdates": [123]
+        }]
+    });
+    let err = Calendar::from_json(&exdate_payload.to_string()).unwrap_err();
+    assert!(
+        matches!(err, EventixError::Other(message) if message.contains("exdates[0]: expected string"))
+    );
+
+    exdate_payload["events"][0]["exdates"] = json!(["2025-11-02T10:00:00+00:00"]);
+    exdate_payload["events"][0]["status"] = json!("not-a-real-status");
+    let err = Calendar::from_json(&exdate_payload.to_string()).unwrap_err();
+    assert!(
+        matches!(err, EventixError::Other(message) if message.contains("Invalid event status"))
+    );
 }

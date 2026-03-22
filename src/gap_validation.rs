@@ -426,11 +426,8 @@ pub fn calculate_density(
     }
 
     let free_duration = total_duration - busy_duration;
-    let occupancy_percentage = if total_duration.num_seconds() > 0 {
-        (busy_duration.num_seconds() as f64 / total_duration.num_seconds() as f64) * 100.0
-    } else {
-        0.0
-    };
+    let occupancy_percentage =
+        (busy_duration.num_seconds() as f64 / total_duration.num_seconds() as f64) * 100.0;
 
     let gaps = find_gaps(calendar, start, end, Duration::minutes(0))?;
     let overlaps = find_overlaps(calendar, start, end)?;
@@ -482,21 +479,26 @@ pub fn is_slot_available(
         ));
     }
 
-    // To catch events that might end during our slot, we need to query from
-    // a wider range - start from beginning of day or before slot_start
-    let query_start = slot_start - Duration::days(1);
-    let occurrences = calendar.events_between(query_start, slot_end)?;
-
-    for occurrence in occurrences.iter() {
-        if !occurrence.event.is_active() {
+    for event in calendar.get_events() {
+        if !event.is_active() {
             continue;
         }
-        let event_start = occurrence.occurrence_time;
-        let event_end = occurrence.end_time();
 
-        // Check for any overlap between event and slot
-        if event_start < slot_end && slot_start < event_end {
-            return Ok(false);
+        let duration = event.duration();
+        if duration <= Duration::zero() {
+            continue;
+        }
+
+        let query_start = slot_start - duration;
+        let occurrences = event.occurrences_between(query_start, slot_end, 100_000)?;
+
+        for occurrence in occurrences {
+            let event_end = occurrence + duration;
+
+            // Check for any overlap between event and slot
+            if occurrence < slot_end && slot_start < event_end {
+                return Ok(false);
+            }
         }
     }
 
@@ -806,21 +808,13 @@ mod tests {
 
         // Actual wall-clock busy time: 09:00 - 12:00 = 3 hours (the merged interval)
         // NOT 4 hours (2+2 with double-counting)
-        assert_eq!(
-            density.busy_duration.num_hours(),
-            3,
-            "Overlapping events should not be double-counted"
-        );
+        assert_eq!(density.busy_duration.num_hours(), 3);
 
         // free = total - busy = 3h - 3h = 0
         assert_eq!(density.free_duration.num_seconds(), 0);
 
         // 100% occupied (fully busy window)
-        assert!(
-            (density.occupancy_percentage - 100.0).abs() < 0.1,
-            "expected ~100%, got {:.2}%",
-            density.occupancy_percentage
-        );
+        assert!((density.occupancy_percentage - 100.0).abs() < 0.1);
 
         // Overlaps are still detected independently
         assert_eq!(density.overlap_count, 1);

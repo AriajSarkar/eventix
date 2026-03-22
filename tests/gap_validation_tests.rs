@@ -3,7 +3,13 @@
 //! These tests validate the unique gap detection and schedule analysis
 //! features that set eventix apart from other calendar crates.
 #![allow(clippy::unwrap_used, clippy::len_zero)]
-use eventix::{gap_validation, timezone, Calendar, Duration, Event, Recurrence};
+
+mod common;
+
+use common::parse;
+use eventix::gap_validation::{EventOverlap, ScheduleDensity, TimeGap};
+use eventix::{gap_validation, timezone, Calendar, Duration, Event, EventStatus, Recurrence};
+use serde_json::json;
 
 #[test]
 fn test_comprehensive_gap_detection() {
@@ -39,10 +45,7 @@ fn test_comprehensive_gap_detection() {
 
     // Verify gap durations
     for gap in &gaps {
-        assert!(
-            gap.duration_minutes() >= 30,
-            "Each gap should be at least 30 minutes"
-        );
+        assert!(gap.duration_minutes() >= 30, "Each gap should be at least 30 minutes");
     }
 }
 
@@ -87,14 +90,8 @@ fn test_overlap_detection_complex() {
 
     // Verify overlap details
     for overlap in &overlaps {
-        assert!(
-            overlap.event_count() >= 2,
-            "Each overlap should involve at least 2 events"
-        );
-        assert!(
-            overlap.duration_minutes() > 0,
-            "Overlap should have positive duration"
-        );
+        assert!(overlap.event_count() >= 2, "Each overlap should involve at least 2 events");
+        assert!(overlap.duration_minutes() > 0, "Overlap should have positive duration");
     }
 }
 
@@ -141,10 +138,7 @@ fn test_schedule_density_analysis() {
     let light_density = gap_validation::calculate_density(&light_cal, start, end).unwrap();
     let busy_density = gap_validation::calculate_density(&busy_cal, start, end).unwrap();
 
-    assert!(
-        light_density.is_light(),
-        "Light schedule should be detected"
-    );
+    assert!(light_density.is_light(), "Light schedule should be detected");
     assert!(busy_density.is_busy(), "Busy schedule should be detected");
     assert!(busy_density.occupancy_percentage > light_density.occupancy_percentage);
 }
@@ -183,10 +177,7 @@ fn test_find_available_slots_for_meeting() {
 
     // Verify all slots are long enough
     for slot in slots {
-        assert!(
-            slot.duration >= Duration::hours(2),
-            "Each slot should fit 2-hour meeting"
-        );
+        assert!(slot.duration >= Duration::hours(2), "Each slot should fit 2-hour meeting");
     }
 }
 
@@ -285,10 +276,7 @@ fn test_longest_gap_finder() {
     let gap = longest_gap.unwrap();
 
     // The gap between 9:30 and 16:00 should be the longest (6.5 hours)
-    assert!(
-        gap.duration_hours() >= 6,
-        "Longest gap should be at least 6 hours"
-    );
+    assert!(gap.duration_hours() >= 6, "Longest gap should be at least 6 hours");
 }
 
 #[test]
@@ -400,10 +388,7 @@ fn test_density_metrics_comprehensive() {
         (density.occupancy_percentage - 30.0).abs() < 1.0,
         "Should be approximately 30% occupied"
     );
-    assert!(
-        density.free_duration > density.busy_duration,
-        "Should have more free time"
-    );
+    assert!(density.free_duration > density.busy_duration, "Should have more free time");
     assert!(!density.has_conflicts(), "Should have no conflicts");
     // 30% is right at the boundary - not considered "light" (which is <30%)
     assert!(!density.is_busy(), "Should not be considered busy");
@@ -524,10 +509,7 @@ fn test_overlaps_sweep_line_performance() {
     let overlaps = gap_validation::find_overlaps(&cal, start, end).unwrap();
 
     // 100 events % 28 days = ~3-4 events per day at same time = overlaps expected
-    assert!(
-        overlaps.len() > 0,
-        "Should detect overlaps on same-day events"
-    );
+    assert!(overlaps.len() > 0, "Should detect overlaps on same-day events");
 }
 
 #[test]
@@ -588,11 +570,7 @@ fn test_zero_duration_events_no_false_overlaps() {
     let overlaps = gap_validation::find_overlaps(&cal, start, end).unwrap();
 
     // Zero-duration imported events should be ignored, leaving no false overlaps.
-    assert_eq!(
-        overlaps.len(),
-        0,
-        "Zero-duration events should not produce false overlaps"
-    );
+    assert_eq!(overlaps.len(), 0, "Zero-duration events should not produce false overlaps");
 }
 
 #[test]
@@ -651,11 +629,7 @@ fn test_density_with_overlapping_events() {
         free_secs,
         total_secs
     );
-    assert!(
-        free_secs >= 0,
-        "free_duration must never be negative, got {}s",
-        free_secs
-    );
+    assert!(free_secs >= 0, "free_duration must never be negative, got {}s", free_secs);
     assert!(
         density.occupancy_percentage <= 100.0,
         "occupancy must not exceed 100%, got {:.2}%",
@@ -706,10 +680,7 @@ fn test_density_fully_contained_event_not_double_counted() {
         8,
         "Fully contained event should not add extra busy time"
     );
-    assert!(
-        density.free_duration.num_seconds() >= 0,
-        "free_duration must never be negative"
-    );
+    assert!(density.free_duration.num_seconds() >= 0, "free_duration must never be negative");
 }
 
 #[test]
@@ -739,10 +710,7 @@ fn test_calculate_density_zero_range() {
 
     // start == end is a zero-duration range that must be explicitly rejected
     let density = gap_validation::calculate_density(&cal, start, end);
-    assert!(
-        density.is_err(),
-        "Zero range should be rejected by validation"
-    );
+    assert!(density.is_err(), "Zero range should be rejected by validation");
 }
 
 #[test]
@@ -756,15 +724,11 @@ fn test_suggest_alternatives_impossible_duration() {
         gap_validation::suggest_alternatives(&cal, req, Duration::minutes(0), Duration::hours(1));
     assert!(zero_dur.is_err());
 
-    // Requesting a 10-hour duration in a 2-hour search window
+    // Requesting a 10-hour duration in a 1-hour search window
     let alternatives =
         gap_validation::suggest_alternatives(&cal, req, Duration::hours(10), Duration::hours(1))
             .unwrap();
-    assert_eq!(
-        alternatives.len(),
-        0,
-        "Should not return alternatives if duration exceeds window"
-    );
+    assert_eq!(alternatives.len(), 0, "Should not return alternatives if duration exceeds window");
 }
 
 #[test]
@@ -776,10 +740,7 @@ fn test_suggest_alternatives_empty_calendar() {
     let alternatives =
         gap_validation::suggest_alternatives(&cal, req, Duration::hours(1), Duration::hours(2))
             .unwrap();
-    assert!(
-        alternatives.len() >= 4,
-        "Should suggest multiple slots in empty calendar"
-    );
+    assert!(alternatives.len() >= 4, "Should suggest multiple slots in empty calendar");
 }
 
 #[test]
@@ -792,4 +753,131 @@ fn test_is_slot_available_invalid_time_range() {
 
     let available = gap_validation::is_slot_available(&cal, slot_start, slot_end);
     assert!(available.is_err(), "Invalid slot is gracefully rejected");
+}
+
+#[test]
+fn test_find_gaps_negative_min_duration() {
+    let cal = Calendar::new("Test");
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let start = timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+    let end = timezone::parse_datetime_with_tz("2025-11-01 12:00:00", tz).unwrap();
+    let result = gap_validation::find_gaps(&cal, start, end, Duration::minutes(-5));
+    assert!(result.is_err(), "Negative gap duration should return an error");
+}
+
+#[test]
+fn test_suggest_alternatives_invalid_search_window() {
+    let cal = Calendar::new("Test");
+    let tz = timezone::parse_timezone("UTC").unwrap();
+    let req = timezone::parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+    let result =
+        gap_validation::suggest_alternatives(&cal, req, Duration::hours(1), Duration::minutes(-1));
+    assert!(result.is_err(), "Negative search window should return an error");
+}
+
+#[test]
+fn test_gap_validation_slot_availability_uses_event_duration() {
+    let mut calendar = Calendar::new("Long event");
+    calendar.add_event(
+        Event::builder()
+            .title("Overnight deploy")
+            .start("2025-11-01 09:00:00", "UTC")
+            .end("2025-11-03 09:00:00")
+            .build()
+            .unwrap(),
+    );
+
+    let slot_start = parse("2025-11-03 08:30:00", "UTC");
+    let slot_end = parse("2025-11-03 09:30:00", "UTC");
+
+    assert!(!gap_validation::is_slot_available(&calendar, slot_start, slot_end).unwrap());
+}
+
+#[test]
+fn test_gap_validation_helpers_and_zero_duration_events() {
+    let gap = TimeGap::new(
+        parse("2025-11-01 09:00:00", "UTC"),
+        parse("2025-11-01 12:00:00", "UTC"),
+        Some("Before".to_string()),
+        Some("After".to_string()),
+    );
+    assert_eq!(gap.duration_hours(), 3);
+    assert!(gap.is_at_least(Duration::hours(2)));
+
+    let overlap = EventOverlap::new(
+        parse("2025-11-01 10:00:00", "UTC"),
+        parse("2025-11-01 11:00:00", "UTC"),
+        vec!["A".to_string(), "B".to_string()],
+    );
+    assert_eq!(overlap.event_count(), 2);
+
+    let density = ScheduleDensity {
+        total_duration: Duration::hours(4),
+        busy_duration: Duration::hours(1),
+        free_duration: Duration::hours(3),
+        occupancy_percentage: 25.0,
+        event_count: 1,
+        gap_count: 2,
+        overlap_count: 1,
+    };
+    assert!(density.is_light());
+    assert!(density.has_conflicts());
+
+    let zero_duration = json!({
+        "name": "Zero Duration",
+        "events": [{
+            "title": "Marker",
+            "start_time": "2025-11-01T10:00:00+00:00",
+            "end_time": "2025-11-01T10:00:00+00:00",
+            "timezone": "UTC"
+        }]
+    });
+    let calendar = Calendar::from_json(&zero_duration.to_string()).unwrap();
+    let density = gap_validation::calculate_density(
+        &calendar,
+        parse("2025-11-01 09:00:00", "UTC"),
+        parse("2025-11-01 12:00:00", "UTC"),
+    )
+    .unwrap();
+    assert_eq!(density.busy_duration, Duration::zero());
+    assert_eq!(density.occupancy_percentage, 0.0);
+}
+
+#[test]
+fn test_gap_validation_cancelled_slots_and_alternative_suggestions() {
+    let mut blocked = Calendar::new("Cancelled");
+    blocked.add_event(
+        Event::builder()
+            .title("Cancelled block")
+            .start("2025-11-01 10:00:00", "UTC")
+            .duration_hours(2)
+            .status(EventStatus::Cancelled)
+            .build()
+            .unwrap(),
+    );
+    assert!(gap_validation::is_slot_available(
+        &blocked,
+        parse("2025-11-01 10:30:00", "UTC"),
+        parse("2025-11-01 11:30:00", "UTC"),
+    )
+    .unwrap());
+
+    let suggestions = gap_validation::suggest_alternatives(
+        &Calendar::new("Open"),
+        parse("2025-11-01 12:00:00", "UTC"),
+        Duration::hours(1),
+        Duration::hours(3),
+    )
+    .unwrap();
+    assert_eq!(
+        suggestions,
+        vec![
+            parse("2025-11-01 09:00:00", "UTC"),
+            parse("2025-11-01 10:00:00", "UTC"),
+            parse("2025-11-01 11:00:00", "UTC"),
+            parse("2025-11-01 12:00:00", "UTC"),
+            parse("2025-11-01 13:00:00", "UTC"),
+            parse("2025-11-01 14:00:00", "UTC"),
+        ]
+    );
 }

@@ -2,6 +2,7 @@
 
 use crate::error::{EventixError, Result};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Offset, TimeZone};
+use chrono_tz::OffsetComponents;
 use chrono_tz::Tz;
 
 /// Parse a timezone string into a `Tz` object
@@ -85,9 +86,9 @@ pub(crate) fn local_day_window(date: NaiveDate, tz: Tz) -> Result<(DateTime<Tz>,
         .ok_or_else(|| EventixError::ValidationError("Invalid end time".to_string()))?;
 
     let start_dt = resolve_local(tz, start_naive)
-        .ok_or_else(|| EventixError::ValidationError("Ambiguous start time".to_string()))?;
+        .ok_or_else(|| EventixError::ValidationError("Failed to resolve start time".to_string()))?;
     let end_dt = resolve_local(tz, end_naive)
-        .ok_or_else(|| EventixError::ValidationError("Ambiguous end time".to_string()))?;
+        .ok_or_else(|| EventixError::ValidationError("Failed to resolve end time".to_string()))?;
 
     Ok((start_dt, end_dt))
 }
@@ -125,12 +126,7 @@ pub fn convert_timezone(dt: &DateTime<Tz>, target_tz: Tz) -> DateTime<Tz> {
 /// // Winter time is typically standard time
 /// ```
 pub fn is_dst(dt: &DateTime<Tz>) -> bool {
-    let offset = dt.offset().fix();
-    let std_offset = dt
-        .timezone()
-        .offset_from_utc_date(&dt.naive_utc().date())
-        .fix();
-    offset != std_offset
+    dt.offset().dst_offset() != chrono::Duration::zero()
 }
 
 #[cfg(test)]
@@ -168,6 +164,18 @@ mod tests {
     }
 
     #[test]
+    fn test_convert_timezone_across_pacific() {
+        let tz_utc = parse_timezone("UTC").unwrap();
+        let tz_la = parse_timezone("America/Los_Angeles").unwrap();
+
+        let dt_utc = parse_datetime_with_tz("2025-07-15 20:00:00", tz_utc).unwrap();
+        let dt_la = convert_timezone(&dt_utc, tz_la);
+
+        assert_eq!(dt_la.timezone(), tz_la);
+        assert_eq!(dt_la.hour(), 13);
+    }
+
+    #[test]
     fn test_local_day_window_dst_fall_back() {
         let tz = parse_timezone("America/New_York").unwrap();
         let date = chrono::NaiveDate::from_ymd_opt(2025, 11, 2).unwrap();
@@ -177,6 +185,19 @@ mod tests {
         assert_eq!(start.date_naive(), date);
         assert_eq!(end.date_naive(), date.succ_opt().unwrap());
         assert_eq!(end - start, Duration::hours(25));
+    }
+
+    /// Spring-forward: local day is 23 hours (2:00 → 3:00).
+    #[test]
+    fn test_local_day_window_dst_spring_forward() {
+        let tz = parse_timezone("America/New_York").unwrap();
+        let date = chrono::NaiveDate::from_ymd_opt(2025, 3, 9).unwrap();
+
+        let (start, end) = local_day_window(date, tz).unwrap();
+
+        assert_eq!(start.date_naive(), date);
+        assert_eq!(end.date_naive(), date.succ_opt().unwrap());
+        assert_eq!(end - start, Duration::hours(23));
     }
 
     #[test]

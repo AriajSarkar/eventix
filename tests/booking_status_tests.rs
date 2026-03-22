@@ -1,7 +1,9 @@
 //! Integration tests for Booking State Machine
 #![allow(clippy::unwrap_used)]
 
-use eventix::{gap_validation, timezone, Calendar, Duration, Event, EventStatus};
+use eventix::{
+    gap_validation, timezone, Calendar, Duration, Event, EventBuilder, EventStatus, EventixError,
+};
 
 #[test]
 fn test_event_status_lifecycle() {
@@ -135,10 +137,7 @@ fn test_gap_validation_ignores_cancelled_events() {
         .iter()
         .find(|gap| gap.start == cancelled_slot_start && gap.end == cancelled_slot_end);
 
-    assert!(
-        cancelled_slot_gap.is_some(),
-        "Should find a gap where the cancelled event is"
-    );
+    assert!(cancelled_slot_gap.is_some(), "Should find a gap where the cancelled event is");
 }
 
 #[test]
@@ -158,4 +157,48 @@ fn test_event_status_serialization() {
     let restored = Calendar::from_json(&json).unwrap();
 
     assert_eq!(restored.get_events()[0].status, EventStatus::Cancelled);
+}
+
+#[test]
+fn test_event_builder_end_validation_and_default_builder() {
+    let err = Event::builder()
+        .title("Broken end")
+        .start("2025-11-01 10:00:00", "UTC")
+        .end("not-a-date")
+        .build()
+        .unwrap_err();
+    assert!(
+        matches!(err, EventixError::DateTimeParse(message) if message.contains("Could not parse"))
+    );
+
+    let err = Event::builder()
+        .title("Missing timezone")
+        .end("2025-11-01 11:00:00")
+        .build()
+        .unwrap_err();
+    assert!(
+        matches!(err, EventixError::ValidationError(message) if message.contains("Cannot set end time"))
+    );
+
+    let err = Event::builder().title("Missing start").build().unwrap_err();
+    assert!(
+        matches!(err, EventixError::ValidationError(message) if message.contains("start time is required"))
+    );
+
+    let err = Event::builder()
+        .title("Missing end")
+        .start("2025-11-01 10:00:00", "UTC")
+        .build()
+        .unwrap_err();
+    assert!(
+        matches!(err, EventixError::ValidationError(message) if message.contains("end time is required"))
+    );
+
+    let event = EventBuilder::default()
+        .title("Default Builder")
+        .start("2025-11-01 09:00:00", "UTC")
+        .duration_hours(1)
+        .build()
+        .unwrap();
+    assert_eq!(event.title, "Default Builder");
 }

@@ -1,8 +1,12 @@
 #![allow(clippy::unwrap_used)]
 
-use chrono::{Duration, TimeZone};
+mod common;
+
+use chrono::{Duration, TimeZone, Weekday};
+use common::parse;
+use eventix::recurrence::RecurrenceFilter;
 use eventix::timezone;
-use eventix::{gap_validation, Calendar, Event, Recurrence};
+use eventix::{gap_validation, Calendar, Event, EventBuilder, EventStatus, Recurrence};
 use proptest::prelude::*;
 
 proptest! {
@@ -332,4 +336,72 @@ proptest! {
         );
     }
     // END: Gap Validation Property Tests
+}
+
+#[test]
+fn test_event_builder_bulk_field_setters_and_filters() {
+    let monday = parse("2025-11-03 09:00:00", "UTC");
+    let tuesday = parse("2025-11-04 09:00:00", "UTC");
+    let thursday = parse("2025-11-06 09:00:00", "UTC");
+
+    let event = EventBuilder::default()
+        .title("Covered recurrence")
+        .start_datetime(monday)
+        .duration_hours(1)
+        .attendee("initial@example.com")
+        .attendees(vec!["alice@example.com".to_string(), "bob@example.com".to_string()])
+        .recurrence(Recurrence::daily().count(7))
+        .skip_weekends(true)
+        .exception_dates(vec![tuesday, thursday])
+        .status(EventStatus::Blocked)
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        event.attendees,
+        vec!["alice@example.com".to_string(), "bob@example.com".to_string()]
+    );
+    assert_eq!(event.status, EventStatus::Blocked);
+
+    let occurrences = event
+        .occurrences_between(
+            parse("2025-11-03 00:00:00", "UTC"),
+            parse("2025-11-10 00:00:00", "UTC"),
+            16,
+        )
+        .unwrap();
+
+    assert_eq!(
+        occurrences,
+        vec![monday, parse("2025-11-05 09:00:00", "UTC"), parse("2025-11-07 09:00:00", "UTC"),]
+    );
+}
+
+#[test]
+fn test_recurrence_rrule_and_filter_helpers() {
+    let start = parse("2025-11-03 09:00:00", "UTC");
+    let recurrence = Recurrence::weekly()
+        .interval(2)
+        .count(5)
+        .weekdays(vec![Weekday::Mon, Weekday::Wed]);
+    let until = parse("2025-12-31 09:00:00", "UTC");
+    let yearly = Recurrence::yearly().until(until);
+
+    assert_eq!(recurrence.get_interval(), 2);
+    assert_eq!(recurrence.get_count(), Some(5));
+    assert_eq!(yearly.get_until(), Some(until));
+    assert_eq!(recurrence.get_weekdays().unwrap(), [Weekday::Mon, Weekday::Wed]);
+
+    let rrule = recurrence.to_rrule_string(start).unwrap();
+    assert!(rrule.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=5;BYDAY=MON,WED"));
+
+    let filter = RecurrenceFilter::new()
+        .skip_weekends(true)
+        .skip_dates(vec![parse("2025-11-04 09:00:00", "UTC")]);
+    let filtered = filter.filter_occurrences(vec![
+        parse("2025-11-03 09:00:00", "UTC"),
+        parse("2025-11-04 09:00:00", "UTC"),
+        parse("2025-11-08 09:00:00", "UTC"),
+    ]);
+    assert_eq!(filtered, vec![parse("2025-11-03 09:00:00", "UTC")]);
 }

@@ -174,7 +174,9 @@ pub struct WeekView {
 
 impl WeekView {
     fn new(days: [DayView; 7]) -> Self {
-        Self { days }
+        Self {
+            days,
+        }
     }
 
     /// The seven day views in this week.
@@ -227,21 +229,11 @@ pub struct DayIterator<'a> {
 
 impl<'a> DayIterator<'a> {
     pub(crate) fn new(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(
-            calendar,
-            start.date_naive(),
-            start.timezone(),
-            Direction::Forward,
-        )
+        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Forward)
     }
 
     pub(crate) fn backward(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(
-            calendar,
-            start.date_naive(),
-            start.timezone(),
-            Direction::Backward,
-        )
+        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Backward)
     }
 
     fn from_date(
@@ -278,19 +270,15 @@ impl Iterator for DayIterator<'_> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self
-            .current_date
-            .map(|date| remaining_days(date, self.direction))
-            .unwrap_or(0);
+        let remaining =
+            self.current_date.map(|date| remaining_days(date, self.direction)).unwrap_or(0);
         (remaining, Some(remaining))
     }
 }
 
 impl ExactSizeIterator for DayIterator<'_> {
     fn len(&self) -> usize {
-        self.current_date
-            .map(|date| remaining_days(date, self.direction))
-            .unwrap_or(0)
+        self.current_date.map(|date| remaining_days(date, self.direction)).unwrap_or(0)
     }
 }
 
@@ -307,21 +295,11 @@ pub struct WeekIterator<'a> {
 
 impl<'a> WeekIterator<'a> {
     pub(crate) fn new(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(
-            calendar,
-            start.date_naive(),
-            start.timezone(),
-            Direction::Forward,
-        )
+        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Forward)
     }
 
     pub(crate) fn backward(calendar: &'a Calendar, start: DateTime<Tz>) -> Self {
-        Self::from_date(
-            calendar,
-            start.date_naive(),
-            start.timezone(),
-            Direction::Backward,
-        )
+        Self::from_date(calendar, start.date_naive(), start.timezone(), Direction::Backward)
     }
 
     fn from_date(
@@ -398,21 +376,33 @@ fn build_day_view(calendar: &Calendar, date: NaiveDate, timezone: Tz) -> Result<
 }
 
 fn build_week_view(calendar: &Calendar, week_start: NaiveDate, timezone: Tz) -> Result<WeekView> {
-    let mut day_iter = DayIterator::from_date(calendar, week_start, timezone, Direction::Forward);
-    let mut days = Vec::with_capacity(7);
-
-    for _ in 0..7 {
-        let Some(day) = day_iter.next() else {
-            return Err(EventixError::ValidationError(
+    let nth_date = |offset| -> Result<NaiveDate> {
+        week_start.checked_add_days(Days::new(offset)).ok_or_else(|| {
+            EventixError::ValidationError(
                 "Could not construct a full Monday-Sunday week window".to_string(),
-            ));
-        };
-        days.push(day?);
-    }
+            )
+        })
+    };
 
-    let days = days.try_into().map_err(|_| {
-        EventixError::ValidationError("Week views must contain exactly seven days".to_string())
-    })?;
+    let dates = [
+        nth_date(0)?,
+        nth_date(1)?,
+        nth_date(2)?,
+        nth_date(3)?,
+        nth_date(4)?,
+        nth_date(5)?,
+        nth_date(6)?,
+    ];
+
+    let days = [
+        build_day_view(calendar, dates[0], timezone)?,
+        build_day_view(calendar, dates[1], timezone)?,
+        build_day_view(calendar, dates[2], timezone)?,
+        build_day_view(calendar, dates[3], timezone)?,
+        build_day_view(calendar, dates[4], timezone)?,
+        build_day_view(calendar, dates[5], timezone)?,
+        build_day_view(calendar, dates[6], timezone)?,
+    ];
 
     Ok(WeekView::new(days))
 }
@@ -455,23 +445,15 @@ fn remaining_days(date: NaiveDate, direction: Direction) -> usize {
 
 fn remaining_full_weeks(week_start: NaiveDate, direction: Direction) -> usize {
     let remaining = match direction {
-        Direction::Forward => last_full_week_start()
-            .signed_duration_since(week_start)
-            .num_days(),
-        Direction::Backward => week_start
-            .signed_duration_since(first_full_week_start())
-            .num_days(),
+        Direction::Forward => last_full_week_start().signed_duration_since(week_start).num_days(),
+        Direction::Backward => week_start.signed_duration_since(first_full_week_start()).num_days(),
     };
 
     if remaining < 0 {
         return 0;
     }
 
-    remaining
-        .try_into()
-        .unwrap_or(usize::MAX)
-        .saturating_div(7)
-        .saturating_add(1)
+    remaining.try_into().unwrap_or(usize::MAX).saturating_div(7).saturating_add(1)
 }
 
 fn first_full_week_start() -> NaiveDate {
@@ -482,9 +464,8 @@ fn first_full_week_start() -> NaiveDate {
 }
 
 fn last_full_week_start() -> NaiveDate {
-    let latest_start_candidate = NaiveDate::MAX
-        .checked_sub_days(Days::new(6))
-        .unwrap_or(NaiveDate::MAX);
+    let latest_start_candidate =
+        NaiveDate::MAX.checked_sub_days(Days::new(6)).unwrap_or(NaiveDate::MAX);
     align_to_monday(latest_start_candidate).unwrap_or(latest_start_candidate)
 }
 
@@ -624,14 +605,8 @@ mod tests {
 
         let week = next_ok(calendar.weeks(start));
 
-        assert_eq!(
-            week.start_date(),
-            chrono::NaiveDate::from_ymd_opt(2025, 11, 3).unwrap()
-        );
-        assert_eq!(
-            week.end_date(),
-            chrono::NaiveDate::from_ymd_opt(2025, 11, 9).unwrap()
-        );
+        assert_eq!(week.start_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 3).unwrap());
+        assert_eq!(week.end_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 9).unwrap());
         assert_eq!(week.days().len(), 7);
     }
 
@@ -660,10 +635,7 @@ mod tests {
         assert_eq!(occurrence.description(), Some("Weekly planning"));
         assert_eq!(occurrence.location.as_deref(), Some("Room A"));
         assert_eq!(occurrence.status, EventStatus::Confirmed);
-        assert_eq!(
-            occurrence.end_time(),
-            occurrence.occurrence_time + Duration::hours(1)
-        );
+        assert_eq!(occurrence.end_time(), occurrence.occurrence_time + Duration::hours(1));
     }
 
     #[test]
@@ -674,10 +646,7 @@ mod tests {
 
         let day = next_ok(calendar.days(start));
 
-        assert_eq!(
-            day.date(),
-            chrono::NaiveDate::from_ymd_opt(2025, 11, 4).unwrap()
-        );
+        assert_eq!(day.date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 4).unwrap());
         assert_eq!(day.timezone(), tz);
         assert_eq!(day.event_count(), 1);
         assert!(!day.is_empty());
@@ -697,10 +666,7 @@ mod tests {
         let day = next_ok(calendar.days(start));
 
         assert_eq!(day.event_count(), 1);
-        assert!(day
-            .events()
-            .iter()
-            .all(|event| event.status != EventStatus::Cancelled));
+        assert!(day.events().iter().all(|event| event.status != EventStatus::Cancelled));
     }
 
     #[test]
@@ -711,20 +677,10 @@ mod tests {
 
         let weeks = collect_ok(calendar.weeks_back(start).take(2));
 
+        assert_eq!(weeks[0].start_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 10).unwrap());
+        assert_eq!(weeks[1].start_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 3).unwrap());
         assert_eq!(
-            weeks[0].start_date(),
-            chrono::NaiveDate::from_ymd_opt(2025, 11, 10).unwrap()
-        );
-        assert_eq!(
-            weeks[1].start_date(),
-            chrono::NaiveDate::from_ymd_opt(2025, 11, 3).unwrap()
-        );
-        assert_eq!(
-            weeks[0]
-                .days()
-                .iter()
-                .map(DayView::date)
-                .collect::<Vec<_>>(),
+            weeks[0].days().iter().map(DayView::date).collect::<Vec<_>>(),
             vec![
                 chrono::NaiveDate::from_ymd_opt(2025, 11, 10).unwrap(),
                 chrono::NaiveDate::from_ymd_opt(2025, 11, 11).unwrap(),
@@ -777,10 +733,7 @@ mod tests {
         iter.skip_to(chrono::NaiveDate::from_ymd_opt(2025, 11, 5).unwrap());
         let day = next_ok(iter);
 
-        assert_eq!(
-            day.date(),
-            chrono::NaiveDate::from_ymd_opt(2025, 11, 5).unwrap()
-        );
+        assert_eq!(day.date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 5).unwrap());
     }
 
     #[test]
@@ -797,10 +750,7 @@ mod tests {
 
         iter.skip_to(chrono::NaiveDate::from_ymd_opt(2025, 11, 17).unwrap());
         let week = next_ok(iter);
-        assert_eq!(
-            week.start_date(),
-            chrono::NaiveDate::from_ymd_opt(2025, 11, 17).unwrap()
-        );
+        assert_eq!(week.start_date(), chrono::NaiveDate::from_ymd_opt(2025, 11, 17).unwrap());
     }
 
     #[test]
@@ -840,11 +790,7 @@ mod tests {
 
         let start = timezone::parse_datetime_with_tz("2025-11-03 00:00:00", tz).unwrap();
         let week = next_ok(calendar.weeks(start));
-        let titles: Vec<_> = week
-            .all_events()
-            .into_iter()
-            .map(|event| event.title())
-            .collect();
+        let titles: Vec<_> = week.all_events().into_iter().map(|event| event.title()).collect();
 
         assert_eq!(titles, vec!["Monday", "Wednesday"]);
     }
@@ -862,9 +808,7 @@ mod tests {
     fn test_week_boundary_helpers_are_monday_aligned() {
         assert_eq!(first_full_week_start().weekday(), chrono::Weekday::Mon);
         assert_eq!(last_full_week_start().weekday(), chrono::Weekday::Mon);
-        assert!(last_full_week_start()
-            .checked_add_days(Days::new(6))
-            .is_some());
+        assert!(last_full_week_start().checked_add_days(Days::new(6)).is_some());
     }
 
     #[test]
@@ -896,5 +840,54 @@ mod tests {
         iter.skip_to(chrono::NaiveDate::MAX);
         assert!(iter.next().is_none());
         assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_build_week_view_rejects_incomplete_week_window() {
+        let calendar = Calendar::new("Broken Week");
+        let tz = timezone::parse_timezone("UTC").unwrap();
+        let err = build_week_view(&calendar, NaiveDate::MAX, tz).unwrap_err();
+        assert!(
+            matches!(err, EventixError::ValidationError(message) if message.contains("Monday-Sunday"))
+        );
+    }
+
+    #[test]
+    fn test_advance_week_start_none_paths() {
+        assert!(advance_week_start(NaiveDate::MAX, Direction::Forward).is_none());
+        assert!(advance_week_start(last_full_week_start(), Direction::Forward).is_none());
+    }
+
+    #[test]
+    fn test_week_view_all_events_tie_break_same_timestamp() {
+        let mut calendar = Calendar::new("Tie Break");
+        let tz = timezone::parse_timezone("UTC").unwrap();
+
+        calendar.add_event(
+            Event::builder()
+                .title("Bravo")
+                .start("2025-11-03 09:00:00", "UTC")
+                .duration_minutes(30)
+                .build()
+                .unwrap(),
+        );
+        calendar.add_event(
+            Event::builder()
+                .title("Alpha")
+                .description("Later index")
+                .start("2025-11-03 09:00:00", "UTC")
+                .duration_minutes(30)
+                .build()
+                .unwrap(),
+        );
+
+        let start = timezone::parse_datetime_with_tz("2025-11-03 00:00:00", tz).unwrap();
+        let week = next_ok(calendar.weeks(start));
+        let all = week.all_events();
+
+        assert_eq!(all[0].title(), "Bravo");
+        assert_eq!(all[0].description(), None);
+        assert_eq!(all[1].title(), "Alpha");
+        assert_eq!(all[1].description(), Some("Later index"));
     }
 }
