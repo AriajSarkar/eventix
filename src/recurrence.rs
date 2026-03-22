@@ -1,7 +1,8 @@
 //! Recurrence rules and patterns for repeating events
 
 use crate::error::Result;
-use chrono::{DateTime, Datelike, Offset, TimeZone};
+use crate::timezone::resolve_local;
+use chrono::{DateTime, Datelike};
 use chrono_tz::Tz;
 use rrule::Frequency;
 
@@ -150,7 +151,11 @@ impl Recurrence {
     /// let biweekly = Recurrence::weekly().interval(2).count(10);
     /// ```
     pub fn interval(mut self, interval: u16) -> Self {
-        self.interval = if interval == 0 { 1 } else { interval };
+        self.interval = if interval == 0 {
+            1
+        } else {
+            interval
+        };
         self
     }
 
@@ -358,30 +363,6 @@ impl Recurrence {
 /// Shared helper used by the eager generation helpers and the lazy
 /// `OccurrenceIterator`.
 ///
-/// Resolve a `NaiveDateTime` to a timezone-aware `DateTime<Tz>`, handling
-/// DST transitions:
-///
-/// - **Normal / fall-back (ambiguous)**: picks the earlier of two candidates
-/// - **Spring-forward (gap)**: the local time doesn't exist; applies the
-///   pre-gap UTC offset so the resulting wall-clock time shifts forward by
-///   exactly the gap size (e.g. 2:30 AM EST → 3:30 AM EDT), matching
-///   Google Calendar / RFC 5545 behaviour
-fn resolve_local(tz: Tz, naive: chrono::NaiveDateTime) -> Option<DateTime<Tz>> {
-    if let Some(dt) = tz.from_local_datetime(&naive).earliest() {
-        return Some(dt);
-    }
-    // DST gap: the local time doesn't exist.  Determine the UTC offset
-    // that was in effect just before the gap by resolving a time one day
-    // earlier (guaranteed to exist outside the gap).  Converting the
-    // nonexistent local time with that offset naturally lands on the
-    // correct post-transition wall-clock time.
-    let day_before = naive - chrono::Duration::days(1);
-    let pre_gap_dt = tz.from_local_datetime(&day_before).earliest()?;
-    let pre_offset = pre_gap_dt.offset().fix();
-    let utc_naive = naive - pre_offset;
-    Some(chrono::Utc.from_utc_datetime(&utc_naive).with_timezone(&tz))
-}
-
 /// Advance a `DateTime<Tz>` by one recurrence step.
 ///
 /// `intended_time` is the original start's wall-clock time. For
@@ -594,9 +575,7 @@ fn skip_subdaily_to_matching_day(
     // Compute the number of interval-steps needed to reach or pass midnight.
     // Sub-daily uses UTC duration arithmetic, so signed_duration_since is exact.
     let gap_secs = target_dt.signed_duration_since(current).num_seconds();
-    if gap_secs <= 0 {
-        return Some(target_dt);
-    }
+    debug_assert!(gap_secs > 0, "next matching midnight must be after current");
 
     let interval_secs = match frequency {
         Frequency::Hourly => interval as i64 * 3600,
@@ -644,10 +623,10 @@ fn expand_weekdays_in_month(
         if date >= last {
             break;
         }
-        date = match date.succ_opt() {
-            Some(d) => d,
+        match date.succ_opt() {
+            Some(d) => date = d,
             None => break,
-        };
+        }
     }
     results
 }
@@ -831,18 +810,14 @@ impl OccurrenceIterator {
         self.byday_first = false;
 
         // Advance to next period
-        match self.recurrence.frequency {
-            Frequency::Monthly => {
-                let total = (self.byday_next_year as i64) * 12
-                    + (self.byday_next_month as i64 - 1)
-                    + self.recurrence.interval as i64;
-                self.byday_next_year = (total / 12) as i32;
-                self.byday_next_month = (total % 12 + 1) as u32;
-            }
-            Frequency::Yearly => {
-                self.byday_next_year += self.recurrence.interval as i32;
-            }
-            _ => {}
+        if self.recurrence.frequency == Frequency::Monthly {
+            let total = (self.byday_next_year as i64) * 12
+                + (self.byday_next_month as i64 - 1)
+                + self.recurrence.interval as i64;
+            self.byday_next_year = (total / 12) as i32;
+            self.byday_next_month = (total % 12 + 1) as u32;
+        } else {
+            self.byday_next_year += self.recurrence.interval as i32;
         }
 
         // Safety: prevent runaway expansion beyond chrono's NaiveDate range
@@ -2061,5 +2036,85 @@ mod tests {
         assert_eq!(occurrences[1].hour(), 1);
         // Third: Sunday 02:00
         assert_eq!(occurrences[2].hour(), 2);
+    }
+
+    #[test]
+    fn test_uses_byday_expansion_false() {
+        // Uncovered line: frequency matching Monthly without by_weekday
+        let recurrence = Recurrence::monthly().count(1);
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+        let occs: Vec<_> = recurrence.occurrences(start).collect();
+        assert_eq!(occs.len(), 1);
+    }
+
+    #[test]
+    fn test_private_recurrence_helper_guards_and_edges() {
+        use chrono::{Datelike, Weekday};
+
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+        let intended = start.time();
+
+        let recurrence = Recurrence {
+            frequency: Frequency::Weekly,
+            interval: 1,
+            count: Some(2),
+            until: None,
+            by_weekday: Some(vec![]),
+        };
+        let rrule = recurrence.to_rrule_string(start).unwrap();
+        assert!(!rrule.contains("BYDAY"));
+
+        assert!(advance_by_frequency(start, Frequency::Daily, 0, intended).is_none());
+
+        let monthly = advance_by_frequency(start, Frequency::Monthly, 14, intended).unwrap();
+        assert_eq!(monthly.year(), 2026);
+        assert_eq!(monthly.month(), 3);
+
+        assert!(clamp_day_to_month(2025, 13, 31).is_none());
+        assert!(advance_weekly_weekday(start, 0, &[Weekday::Mon], intended).is_none());
+        assert!(advance_weekly_weekday(start, 1, &[], intended).is_none());
+        assert!(advance_daily_weekday(start, 0, &[Weekday::Mon], intended).is_none());
+        assert!(advance_daily_weekday(start, 7, &[Weekday::Tue], intended).is_none());
+        assert!(skip_subdaily_to_matching_day(start, Frequency::Hourly, 1, &[]).is_none());
+        assert!(
+            skip_subdaily_to_matching_day(start, Frequency::Daily, 1, &[Weekday::Thu]).is_none()
+        );
+        assert!(expand_weekdays_in_month(2025, 13, &[Weekday::Mon], tz, intended).is_empty());
+    }
+
+    #[test]
+    fn test_private_occurrence_iterator_exhaustion_paths() {
+        use chrono::Weekday;
+
+        let tz = parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 09:00:00", tz).unwrap();
+
+        let mut exhausted_iter =
+            Recurrence::monthly().weekdays(vec![Weekday::Mon]).count(1).occurrences(start);
+        exhausted_iter.exhausted = true;
+        assert!(exhausted_iter.is_exhausted());
+        assert!(exhausted_iter.next_byday_expanded().is_none());
+
+        let mut no_byday = Recurrence::daily().count(1).occurrences(start);
+        no_byday.expand_next_byday_period();
+        assert!(no_byday.exhausted);
+
+        let mut wrong_freq = Recurrence::daily().count(1).occurrences(start);
+        wrong_freq.recurrence.by_weekday = Some(vec![Weekday::Mon]);
+        wrong_freq.expand_next_byday_period();
+        assert!(wrong_freq.exhausted);
+
+        let mut high_year =
+            Recurrence::yearly().weekdays(vec![Weekday::Mon]).count(1).occurrences(start);
+        high_year.byday_next_year = 10_000;
+        high_year.expand_next_byday_period();
+        assert!(high_year.exhausted);
+
+        let mut no_next = Recurrence::daily().count(2).occurrences(start);
+        no_next.recurrence.interval = 0;
+        assert_eq!(no_next.next(), Some(start));
+        assert!(no_next.exhausted);
     }
 }

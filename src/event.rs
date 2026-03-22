@@ -2,14 +2,16 @@
 
 use crate::error::{EventixError, Result};
 use crate::recurrence::{Recurrence, RecurrenceFilter};
-use crate::timezone::{parse_datetime_with_tz, parse_timezone};
-use chrono::{DateTime, Duration, TimeZone};
+use crate::timezone::{local_day_window, parse_datetime_with_tz, parse_timezone};
+use chrono::{DateTime, Duration};
 use chrono_tz::Tz;
 
 use serde::{Deserialize, Serialize};
 
 /// Status of an event in the booking lifecycle
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 pub enum EventStatus {
     /// The event is confirmed and occupies time (default)
     #[default]
@@ -98,6 +100,11 @@ impl Event {
         end: DateTime<Tz>,
         max_occurrences: usize,
     ) -> Result<Vec<DateTime<Tz>>> {
+        if start > end {
+            return Err(crate::error::EventixError::ValidationError(
+                "Start time must be before or equal to end time".to_string(),
+            ));
+        }
         if max_occurrences == 0 {
             return Ok(vec![]);
         }
@@ -151,20 +158,7 @@ impl Event {
 
     /// Check if this event occurs on a specific date
     pub fn occurs_on(&self, date: DateTime<Tz>) -> Result<bool> {
-        let start = date.date_naive().and_hms_opt(0, 0, 0).ok_or_else(|| {
-            EventixError::ValidationError("Invalid start time for date check".to_string())
-        })?;
-        let end = date.date_naive().and_hms_opt(23, 59, 59).ok_or_else(|| {
-            EventixError::ValidationError("Invalid end time for date check".to_string())
-        })?;
-
-        let start_dt = self.timezone.from_local_datetime(&start).earliest().ok_or_else(|| {
-            EventixError::ValidationError("Ambiguous start time for date check".to_string())
-        })?;
-        let end_dt = self.timezone.from_local_datetime(&end).latest().ok_or_else(|| {
-            EventixError::ValidationError("Ambiguous end time for date check".to_string())
-        })?;
-
+        let (start_dt, end_dt) = local_day_window(date.date_naive(), self.timezone)?;
         let occurrences = self.occurrences_between(start_dt, end_dt, 1)?;
         Ok(!occurrences.is_empty())
     }
@@ -445,9 +439,7 @@ impl EventBuilder {
             EventixError::ValidationError("Event end time is required".to_string())
         })?;
 
-        let timezone = self.timezone.ok_or_else(|| {
-            EventixError::ValidationError("Event timezone is required".to_string())
-        })?;
+        let timezone = self.timezone.unwrap_or_else(|| start_time.timezone());
 
         if end_time <= start_time {
             return Err(EventixError::ValidationError(
@@ -573,11 +565,7 @@ mod tests {
         // All results should be weekdays
         for occ in &occs {
             let wd = occ.weekday();
-            assert!(
-                wd != chrono::Weekday::Sat && wd != chrono::Weekday::Sun,
-                "weekend snuck through: {:?}",
-                wd
-            );
+            assert!(wd != chrono::Weekday::Sat && wd != chrono::Weekday::Sun);
         }
     }
 
@@ -661,11 +649,7 @@ mod tests {
         assert_eq!(occs.len(), 20);
         for occ in &occs {
             let wd = occ.weekday();
-            assert!(
-                wd != chrono::Weekday::Sat && wd != chrono::Weekday::Sun,
-                "weekend occurrence found: {}",
-                occ
-            );
+            assert!(wd != chrono::Weekday::Sat && wd != chrono::Weekday::Sun);
         }
     }
 
@@ -696,7 +680,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         // Should surface the real timezone error, not "Start time is required"
-        assert!(!err.contains("required"), "Expected timezone parse error, got: {}", err);
+        assert!(!err.contains("required"));
     }
 
     #[test]
@@ -708,7 +692,7 @@ mod tests {
             .build();
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(!err.contains("required"), "Expected datetime parse error, got: {}", err);
+        assert!(!err.contains("required"));
     }
 
     #[test]
@@ -735,15 +719,57 @@ mod tests {
 
         let occs = event.occurrences_between(start, end, 100).unwrap();
         // Should have 4 occurrences (10:00, 11:00, 13:00, 14:00) — 12:00 excluded
-        assert_eq!(
-            occs.len(),
-            4,
-            "exdate should skip only the 12:00 occurrence, got: {:?}",
-            occs.iter().map(|d| d.format("%H:%M").to_string()).collect::<Vec<_>>()
-        );
+        assert_eq!(occs.len(), 4);
         // Verify 12:00 is not in the list
         for occ in &occs {
             assert_ne!(occ.hour(), 12, "12:00 should be excluded");
         }
+    }
+
+    #[test]
+    fn test_occurs_on_true_for_matching_day() {
+        let event = Event::builder()
+            .title("Meeting")
+            .start("2025-11-03 10:00:00", "America/New_York")
+            .duration_hours(1)
+            .build()
+            .unwrap();
+
+        let tz = crate::timezone::parse_timezone("America/New_York").unwrap();
+        let date = crate::timezone::parse_datetime_with_tz("2025-11-03 00:00:00", tz).unwrap();
+
+        assert!(event.occurs_on(date).unwrap());
+    }
+
+    #[test]
+    fn test_occurs_on_false_for_non_matching_day() {
+        let event = Event::builder()
+            .title("Meeting")
+            .start("2025-11-03 10:00:00", "America/New_York")
+            .duration_hours(1)
+            .build()
+            .unwrap();
+
+        let tz = crate::timezone::parse_timezone("America/New_York").unwrap();
+        let date = crate::timezone::parse_datetime_with_tz("2025-11-04 00:00:00", tz).unwrap();
+
+        assert!(!event.occurs_on(date).unwrap());
+    }
+
+    #[test]
+    fn test_occurrences_between_invalid_range() {
+        let tz = crate::timezone::parse_timezone("America/New_York").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-11-03 10:00:00", tz).unwrap();
+        let end = crate::timezone::parse_datetime_with_tz("2025-11-02 10:00:00", tz).unwrap();
+
+        let event = Event::builder()
+            .title("Meeting")
+            .start("2025-11-03 09:00:00", "America/New_York")
+            .duration_hours(1)
+            .build()
+            .unwrap();
+
+        let result = event.occurrences_between(start, end, 5);
+        assert!(result.is_err());
     }
 }

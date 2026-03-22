@@ -171,6 +171,17 @@ pub fn find_gaps(
     end: DateTime<Tz>,
     min_gap_duration: Duration,
 ) -> Result<Vec<TimeGap>> {
+    if start >= end {
+        return Err(crate::error::EventixError::ValidationError(
+            "Start time must be before end time".to_string(),
+        ));
+    }
+    if min_gap_duration < Duration::zero() {
+        return Err(crate::error::EventixError::ValidationError(
+            "min_gap_duration cannot be negative".to_string(),
+        ));
+    }
+
     let mut occurrences = calendar.events_between(start, end)?;
 
     // Filter out inactive events (e.g. Cancelled)
@@ -181,14 +192,19 @@ pub fn find_gaps(
 
     let mut gaps = Vec::new();
     let mut current_time = start;
+    let mut last_event_title: Option<String> = None;
 
     for occurrence in occurrences.iter() {
         let event_start = occurrence.occurrence_time;
 
         // Check if there's a gap before this event
         if event_start > current_time {
-            let gap =
-                TimeGap::new(current_time, event_start, None, Some(occurrence.title().to_string()));
+            let gap = TimeGap::new(
+                current_time,
+                event_start,
+                last_event_title.clone(),
+                Some(occurrence.title().to_string()),
+            );
 
             if gap.duration >= min_gap_duration {
                 gaps.push(gap);
@@ -199,12 +215,13 @@ pub fn find_gaps(
         let event_end = occurrence.end_time();
         if event_end > current_time {
             current_time = event_end;
+            last_event_title = Some(occurrence.title().to_string());
         }
     }
 
     // Check for gap at the end
     if end > current_time {
-        let gap = TimeGap::new(current_time, end, None, None);
+        let gap = TimeGap::new(current_time, end, last_event_title, None);
         if gap.duration >= min_gap_duration {
             gaps.push(gap);
         }
@@ -252,6 +269,12 @@ pub fn find_overlaps(
     start: DateTime<Tz>,
     end: DateTime<Tz>,
 ) -> Result<Vec<EventOverlap>> {
+    if start >= end {
+        return Err(crate::error::EventixError::ValidationError(
+            "Start time must be before end time".to_string(),
+        ));
+    }
+
     use std::collections::BTreeSet;
 
     let mut occurrences = calendar.events_between(start, end)?;
@@ -357,28 +380,54 @@ pub fn calculate_density(
     start: DateTime<Tz>,
     end: DateTime<Tz>,
 ) -> Result<ScheduleDensity> {
+    if start >= end {
+        return Err(crate::error::EventixError::ValidationError(
+            "Start time must be before end time".to_string(),
+        ));
+    }
+
     let total_duration = end.signed_duration_since(start);
     let mut occurrences = calendar.events_between(start, end)?;
 
     // Filter out inactive events
     occurrences.retain(|e| e.event.is_active());
 
-    // Calculate busy time
+    // Calculate busy time by merging overlapping intervals to avoid
+    // double-counting shared time (which would make free_duration negative).
+    occurrences.sort_by_key(|o| o.occurrence_time);
     let mut busy_duration = Duration::zero();
+    let mut current_end: Option<DateTime<Tz>> = None;
+
     for occurrence in occurrences.iter() {
         let event_start = occurrence.occurrence_time.max(start);
         let event_end = occurrence.end_time().min(end);
-        if event_end > event_start {
-            busy_duration += event_end.signed_duration_since(event_start);
+        if event_end <= event_start {
+            continue;
+        }
+
+        match current_end {
+            None => {
+                current_end = Some(event_end);
+                busy_duration += event_end.signed_duration_since(event_start);
+            }
+            Some(prev_end) => {
+                if event_start >= prev_end {
+                    // No overlap — add full duration
+                    busy_duration += event_end.signed_duration_since(event_start);
+                    current_end = Some(event_end);
+                } else if event_end > prev_end {
+                    // Partial overlap — add only the extension past prev_end
+                    busy_duration += event_end.signed_duration_since(prev_end);
+                    current_end = Some(event_end);
+                }
+                // else: fully contained in previous interval, no additional busy time
+            }
         }
     }
 
     let free_duration = total_duration - busy_duration;
-    let occupancy_percentage = if total_duration.num_seconds() > 0 {
-        (busy_duration.num_seconds() as f64 / total_duration.num_seconds() as f64) * 100.0
-    } else {
-        0.0
-    };
+    let occupancy_percentage =
+        (busy_duration.num_seconds() as f64 / total_duration.num_seconds() as f64) * 100.0;
 
     let gaps = find_gaps(calendar, start, end, Duration::minutes(0))?;
     let overlaps = find_overlaps(calendar, start, end)?;
@@ -424,21 +473,32 @@ pub fn is_slot_available(
     slot_start: DateTime<Tz>,
     slot_end: DateTime<Tz>,
 ) -> Result<bool> {
-    // To catch events that might end during our slot, we need to query from
-    // a wider range - start from beginning of day or before slot_start
-    let query_start = slot_start - Duration::days(1);
-    let occurrences = calendar.events_between(query_start, slot_end)?;
+    if slot_start >= slot_end {
+        return Err(crate::error::EventixError::ValidationError(
+            "Slot start time must be before end time".to_string(),
+        ));
+    }
 
-    for occurrence in occurrences.iter() {
-        if !occurrence.event.is_active() {
+    for event in calendar.get_events() {
+        if !event.is_active() {
             continue;
         }
-        let event_start = occurrence.occurrence_time;
-        let event_end = occurrence.end_time();
 
-        // Check for any overlap between event and slot
-        if event_start < slot_end && slot_start < event_end {
-            return Ok(false);
+        let duration = event.duration();
+        if duration <= Duration::zero() {
+            continue;
+        }
+
+        let query_start = slot_start - duration;
+        let occurrences = event.occurrences_between(query_start, slot_end, 100_000)?;
+
+        for occurrence in occurrences {
+            let event_end = occurrence + duration;
+
+            // Check for any overlap between event and slot
+            if occurrence < slot_end && slot_start < event_end {
+                return Ok(false);
+            }
         }
     }
 
@@ -487,6 +547,17 @@ pub fn suggest_alternatives(
     duration: Duration,
     search_window: Duration,
 ) -> Result<Vec<DateTime<Tz>>> {
+    if duration <= Duration::zero() {
+        return Err(crate::error::EventixError::ValidationError(
+            "Duration must be greater than zero".to_string(),
+        ));
+    }
+    if search_window <= Duration::zero() {
+        return Err(crate::error::EventixError::ValidationError(
+            "Search window must be greater than zero".to_string(),
+        ));
+    }
+
     let search_start = requested_start - search_window;
     let search_end = requested_start + search_window;
 
@@ -703,5 +774,49 @@ mod tests {
 
         assert!(density.is_busy());
         assert!(density.occupancy_percentage > 60.0);
+    }
+
+    #[test]
+    fn test_calculate_density_with_overlapping_events() {
+        let mut cal = Calendar::new("Overlapping");
+
+        // Event A: 09:00 - 11:00 (2 hours)
+        cal.add_event(
+            Event::builder()
+                .title("Event A")
+                .start("2025-11-01 09:00:00", "UTC")
+                .duration_hours(2)
+                .build()
+                .unwrap(),
+        );
+
+        // Event B: 10:00 - 12:00 (2 hours, overlaps A by 1 hour)
+        cal.add_event(
+            Event::builder()
+                .title("Event B")
+                .start("2025-11-01 10:00:00", "UTC")
+                .duration_hours(2)
+                .build()
+                .unwrap(),
+        );
+
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let start = parse_datetime_with_tz("2025-11-01 09:00:00", tz).unwrap();
+        let end = parse_datetime_with_tz("2025-11-01 12:00:00", tz).unwrap();
+
+        let density = calculate_density(&cal, start, end).unwrap();
+
+        // Actual wall-clock busy time: 09:00 - 12:00 = 3 hours (the merged interval)
+        // NOT 4 hours (2+2 with double-counting)
+        assert_eq!(density.busy_duration.num_hours(), 3);
+
+        // free = total - busy = 3h - 3h = 0
+        assert_eq!(density.free_duration.num_seconds(), 0);
+
+        // 100% occupied (fully busy window)
+        assert!((density.occupancy_percentage - 100.0).abs() < 0.1);
+
+        // Overlaps are still detected independently
+        assert_eq!(density.overlap_count, 1);
     }
 }

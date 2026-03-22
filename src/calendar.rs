@@ -3,7 +3,9 @@
 use crate::error::{EventixError, Result};
 use crate::event::Event;
 use crate::recurrence::Recurrence;
-use chrono::{DateTime, TimeZone};
+use crate::timezone::local_day_window;
+use crate::views::{DayIterator, WeekIterator};
+use chrono::DateTime;
 use chrono_tz::Tz;
 use rrule::Frequency;
 
@@ -180,6 +182,12 @@ impl Calendar {
         end: DateTime<Tz>,
         max_per_event: usize,
     ) -> Result<Vec<EventOccurrence<'_>>> {
+        if start > end {
+            return Err(crate::error::EventixError::ValidationError(
+                "Start time must be before or equal to end time".to_string(),
+            ));
+        }
+
         let mut occurrences = Vec::new();
 
         for (index, event) in self.events.iter().enumerate() {
@@ -202,26 +210,42 @@ impl Calendar {
 
     /// Get all events occurring on a specific date
     pub fn events_on_date(&self, date: DateTime<Tz>) -> Result<Vec<EventOccurrence<'_>>> {
-        let start = date
-            .date_naive()
-            .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| EventixError::ValidationError("Invalid start time".to_string()))?;
-        let end = date
-            .date_naive()
-            .and_hms_opt(23, 59, 59)
-            .ok_or_else(|| EventixError::ValidationError("Invalid end time".to_string()))?;
-
-        let tz = date.timezone();
-        let start_dt = tz
-            .from_local_datetime(&start)
-            .earliest()
-            .ok_or_else(|| EventixError::ValidationError("Ambiguous start time".to_string()))?;
-        let end_dt = tz
-            .from_local_datetime(&end)
-            .latest()
-            .ok_or_else(|| EventixError::ValidationError("Ambiguous end time".to_string()))?;
-
+        let (start_dt, end_dt) = local_day_window(date.date_naive(), date.timezone())?;
         self.events_between(start_dt, end_dt)
+    }
+
+    /// Create a lazy iterator over calendar days starting from the given date.
+    ///
+    /// Each yielded item is a [`crate::Result`] containing a [`crate::DayView`]
+    /// for the requested local day. Views bucket active occurrences whose time
+    /// span intersects the day, so overnight events appear on every day they
+    /// overlap. The iterator advances one day at a time until the supported
+    /// date range is exhausted.
+    pub fn days(&self, start: DateTime<Tz>) -> DayIterator<'_> {
+        DayIterator::new(self, start)
+    }
+
+    /// Create a lazy iterator over calendar days moving backward in time.
+    ///
+    /// Each yielded item is a [`crate::Result`] containing a [`crate::DayView`].
+    pub fn days_back(&self, start: DateTime<Tz>) -> DayIterator<'_> {
+        DayIterator::backward(self, start)
+    }
+
+    /// Create a lazy iterator over ISO weeks (Monday through Sunday).
+    ///
+    /// The first yielded item is a [`crate::Result`] containing the Monday-Sunday
+    /// week that contains `start`.
+    pub fn weeks(&self, start: DateTime<Tz>) -> WeekIterator<'_> {
+        WeekIterator::new(self, start)
+    }
+
+    /// Create a lazy iterator over ISO weeks moving backward in time.
+    ///
+    /// Each yielded item is a [`crate::Result`] containing a contiguous
+    /// Monday-Sunday block.
+    pub fn weeks_back(&self, start: DateTime<Tz>) -> WeekIterator<'_> {
+        WeekIterator::backward(self, start)
     }
 
     /// Get the number of events in the calendar
@@ -267,12 +291,15 @@ impl Calendar {
             "timezone": self.timezone.map(|tz| tz.name()),
         });
 
-        serde_json::to_string_pretty(&json_val).map_err(|e| {
-            crate::error::EventixError::Other(format!("JSON serialization error: {}", e))
-        })
+        serde_json::to_string_pretty(&json_val)
+            .map_err(|e| EventixError::Other(format!("JSON serialization error: {}", e)))
     }
 
-    /// Import calendar from JSON
+    /// Import calendar from JSON.
+    ///
+    /// If the top-level `"timezone"` field is present but not a valid IANA name,
+    /// it is ignored (treated as unset) so a typo does not fail the whole import.
+    /// Event-level `"timezone"` strings must still be valid or import fails.
     pub fn from_json(json: &str) -> Result<Self> {
         use crate::timezone::parse_timezone;
 
@@ -629,7 +656,7 @@ mod tests {
 
         let json = cal.to_json().unwrap();
         // Verify recurrence and exdates are in the JSON
-        assert!(json.contains("\"frequency\""), "JSON should contain recurrence frequency");
+        assert!(json.contains("\"frequency\""));
         assert!(json.contains("\"exdates\""), "JSON should contain exdates");
 
         let restored = Calendar::from_json(&json).unwrap();
@@ -657,7 +684,7 @@ mod tests {
             }]
         }"#;
         let result = Calendar::from_json(json);
-        assert!(result.is_err(), "Should reject unknown recurrence frequency");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -674,7 +701,7 @@ mod tests {
             }]
         }"#;
         let result = Calendar::from_json(json);
-        assert!(result.is_err(), "Should reject unparseable exdate");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -690,7 +717,7 @@ mod tests {
             }]
         }"#;
         let result = Calendar::from_json(json);
-        assert!(result.is_err(), "Should reject interval exceeding u16::MAX");
+        assert!(result.is_err());
     }
 
     #[test]
@@ -707,6 +734,171 @@ mod tests {
             }]
         }"#;
         let result = Calendar::from_json(json);
-        assert!(result.is_err(), "Should reject both count and until");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_json_allows_missing_events_array() {
+        let calendar = Calendar::from_json(r#"{"name":"Empty Calendar"}"#).unwrap();
+        assert!(calendar.events.is_empty());
+    }
+
+    #[test]
+    fn test_from_json_rejects_malformed_json() {
+        let err = Calendar::from_json("not valid json {{{").unwrap_err();
+        assert!(
+            matches!(err, crate::error::EventixError::Other(message) if message.contains("JSON parse error"))
+        );
+    }
+
+    #[test]
+    fn test_to_json_roundtrip_preserves_calendar_level_timezone() {
+        let tz = crate::timezone::parse_timezone("Europe/London").unwrap();
+        let mut cal = Calendar::new("TZ Calendar").timezone(tz);
+        cal.add_event(
+            Event::builder()
+                .title("Meeting")
+                .start("2025-06-01 14:00:00", "Europe/London")
+                .duration_hours(1)
+                .build()
+                .unwrap(),
+        );
+
+        let json = cal.to_json().unwrap();
+        assert!(json.contains("\"timezone\""));
+        assert!(json.contains("Europe/London"));
+
+        let restored = Calendar::from_json(&json).unwrap();
+        assert_eq!(restored.timezone, Some(tz));
+        assert_eq!(restored.event_count(), 1);
+    }
+
+    #[test]
+    fn test_recurrence_to_json_covers_all_frequencies_and_optional_fields() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let until = crate::timezone::parse_datetime_with_tz("2025-02-01 00:00:00", tz).unwrap();
+
+        for (recurrence, expected) in [
+            (Recurrence::secondly(), "secondly"),
+            (Recurrence::minutely(), "minutely"),
+            (Recurrence::hourly(), "hourly"),
+            (Recurrence::daily(), "daily"),
+            (Recurrence::weekly(), "weekly"),
+            (Recurrence::monthly(), "monthly"),
+            (Recurrence::yearly(), "yearly"),
+        ] {
+            assert_eq!(recurrence_to_json(&recurrence)["frequency"], expected);
+        }
+
+        let recurrence = Recurrence::yearly().interval(3).until(until).weekdays(vec![
+            chrono::Weekday::Mon,
+            chrono::Weekday::Tue,
+            chrono::Weekday::Wed,
+            chrono::Weekday::Thu,
+            chrono::Weekday::Fri,
+            chrono::Weekday::Sat,
+            chrono::Weekday::Sun,
+        ]);
+        let json = recurrence_to_json(&recurrence);
+
+        assert_eq!(json["frequency"], "yearly");
+        assert_eq!(json["interval"], 3);
+        assert_eq!(json["until"], until.to_rfc3339());
+        assert_eq!(json["weekdays"], serde_json::json!(["MO", "TU", "WE", "TH", "FR", "SA", "SU"]));
+    }
+
+    #[test]
+    fn test_json_to_recurrence_parses_count_until_and_weekdays() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let recurrence = json_to_recurrence(
+            &serde_json::json!({
+                "frequency": "weekly",
+                "interval": 2,
+                "count": 7,
+                "weekdays": ["MO", "TU", "WE", "TH", "FR", "SA", "SU"]
+            }),
+            tz,
+        )
+        .unwrap();
+
+        assert_eq!(recurrence.frequency(), Frequency::Weekly);
+        assert_eq!(recurrence.get_interval(), 2);
+        assert_eq!(recurrence.get_count(), Some(7));
+        assert_eq!(
+            recurrence.get_weekdays().unwrap(),
+            [
+                chrono::Weekday::Mon,
+                chrono::Weekday::Tue,
+                chrono::Weekday::Wed,
+                chrono::Weekday::Thu,
+                chrono::Weekday::Fri,
+                chrono::Weekday::Sat,
+                chrono::Weekday::Sun,
+            ]
+        );
+
+        let until = json_to_recurrence(
+            &serde_json::json!({
+                "frequency": "monthly",
+                "interval": 1,
+                "until": "2025-02-01T00:00:00+00:00"
+            }),
+            tz,
+        )
+        .unwrap();
+        assert_eq!(
+            until.get_until(),
+            Some(crate::timezone::parse_datetime_with_tz("2025-02-01 00:00:00", tz).unwrap())
+        );
+    }
+
+    #[test]
+    fn test_json_to_recurrence_rejects_unknown_weekday() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let err = json_to_recurrence(
+            &serde_json::json!({
+                "frequency": "weekly",
+                "interval": 1,
+                "weekdays": ["XX"]
+            }),
+            tz,
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(err, EventixError::Other(message) if message.contains("Unknown weekday: XX"))
+        );
+    }
+    #[test]
+    fn test_events_between_invalid_range() {
+        use crate::timezone::parse_datetime_with_tz;
+        use crate::timezone::parse_timezone;
+        let cal = Calendar::new("Test");
+        let tz = parse_timezone("UTC").unwrap();
+        let start = parse_datetime_with_tz("2025-11-01 12:00:00", tz).unwrap();
+        let end = parse_datetime_with_tz("2025-11-01 10:00:00", tz).unwrap();
+
+        let result = cal.events_between(start, end);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_events_on_date_valid() {
+        use crate::timezone::parse_datetime_with_tz;
+        use crate::timezone::parse_timezone;
+        let mut cal = Calendar::new("Test");
+        let event = crate::event::Event::builder()
+            .title("Test Event")
+            .start("2025-11-01 15:00:00", "America/New_York")
+            .duration_hours(1)
+            .build()
+            .unwrap();
+        cal.add_event(event);
+
+        let tz = parse_timezone("America/New_York").unwrap();
+        let query_date = parse_datetime_with_tz("2025-11-01 00:00:00", tz).unwrap();
+
+        let occurrences = cal.events_on_date(query_date).unwrap();
+        assert_eq!(occurrences.len(), 1);
     }
 }

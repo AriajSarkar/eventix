@@ -162,7 +162,7 @@ fn event_to_ical(event: &Event) -> Result<IEvent> {
 
     // Add attendees
     for attendee in &event.attendees {
-        ical_event.add_property("ATTENDEE", format!("mailto:{}", attendee));
+        ical_event.add_multi_property("ATTENDEE", &format!("mailto:{}", attendee));
     }
 
     // Add recurrence rule if present
@@ -460,6 +460,7 @@ fn parse_ical_datetime_value(dt_str: &str, tz: Tz) -> Result<DateTime<Tz>> {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    use chrono::{Datelike, Timelike};
 
     #[test]
     fn test_ics_export() {
@@ -567,11 +568,7 @@ mod tests {
         let result = parse_rrule_value("FREQ=DAILY;COUNT=90;BYMONTH=3", start);
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        assert!(
-            err_msg.contains("BYMONTH"),
-            "Error should mention unsupported component: {}",
-            err_msg
-        );
+        assert!(err_msg.contains("BYMONTH"));
 
         // BYSETPOS is unsupported
         let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=MO;BYSETPOS=1", start);
@@ -581,7 +578,7 @@ mod tests {
         let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=1MO", start);
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        assert!(err_msg.contains("1MO"), "Error should mention the token: {}", err_msg);
+        assert!(err_msg.contains("1MO"));
 
         let result = parse_rrule_value("FREQ=MONTHLY;BYDAY=-1FR", start);
         assert!(result.is_err());
@@ -590,10 +587,127 @@ mod tests {
         let result = parse_rrule_value("FREQ=DAILY;COUNT=10;UNTIL=20250201T000000Z", start);
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
+        assert!(err_msg.contains("COUNT") && err_msg.contains("UNTIL"));
+    }
+
+    #[test]
+    fn test_parse_rrule_value_covers_yearly_and_numeric_errors() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let start = crate::timezone::parse_datetime_with_tz("2025-01-01 10:00:00", tz).unwrap();
+
+        let yearly = parse_rrule_value("FREQ=YEARLY;COUNT=1", start).unwrap();
+        assert_eq!(yearly.frequency(), rrule::Frequency::Yearly);
+
+        let err = parse_rrule_value("FREQ=FORTNIGHTLY;COUNT=1", start).unwrap_err();
+        assert!(err.to_string().contains("FORTNIGHTLY"));
+
+        let err = parse_rrule_value("FREQ=DAILY;INTERVAL=abc", start).unwrap_err();
+        assert!(err.to_string().contains("INTERVAL"));
+
+        let err = parse_rrule_value("FREQ=DAILY;COUNT=abc", start).unwrap_err();
+        assert!(err.to_string().contains("COUNT"));
+    }
+
+    #[test]
+    fn test_parse_ical_datetime_value_rejects_dst_gap() {
+        let tz = crate::timezone::parse_timezone("America/New_York").unwrap();
+        let err = parse_ical_datetime_value("20250309T023000", tz).unwrap_err();
         assert!(
-            err_msg.contains("COUNT") && err_msg.contains("UNTIL"),
-            "Error should mention both COUNT and UNTIL: {}",
-            err_msg
+            matches!(err, EventixError::DateTimeParse(message) if message.contains("Cannot create datetime"))
         );
+    }
+
+    #[test]
+    fn test_parse_ical_datetime_value_date_only() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let dt = parse_ical_datetime_value("20251101", tz).unwrap();
+        assert_eq!(dt.hour(), 0);
+        assert_eq!(dt.minute(), 0);
+        assert_eq!(dt.day(), 1);
+        assert_eq!(dt.month(), 11);
+    }
+
+    #[test]
+    fn test_parse_ical_datetime_value_invalid_short_string() {
+        let tz = crate::timezone::parse_timezone("UTC").unwrap();
+        let err = parse_ical_datetime_value("2025110", tz).unwrap_err();
+        assert!(matches!(err, EventixError::DateTimeParse(_)));
+    }
+
+    #[test]
+    fn test_from_ics_string_rejects_unparseable_icalendar() {
+        let err = Calendar::from_ics_string("<<<not valid>>>").unwrap_err();
+        assert!(
+            matches!(err, EventixError::IcsError(message) if message.contains("Failed to parse ICS"))
+        );
+    }
+
+    #[test]
+    fn test_export_to_ics_and_import_from_ics_roundtrip_path() {
+        let mut cal = Calendar::new("Path Roundtrip");
+        cal.add_event(
+            Event::builder()
+                .title("Disk Event")
+                .start("2025-11-01 12:00:00", "UTC")
+                .duration_hours(1)
+                .build()
+                .unwrap(),
+        );
+
+        let path = std::env::temp_dir().join(format!("eventix_path_{}.ics", uuid::Uuid::new_v4()));
+        cal.export_to_ics(&path).unwrap();
+
+        let imported = Calendar::import_from_ics(&path).unwrap();
+        assert_eq!(imported.name, "Path Roundtrip");
+        assert_eq!(imported.event_count(), 1);
+        assert_eq!(imported.events[0].title, "Disk Event");
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_import_from_ics_missing_file_errors() {
+        let path =
+            std::env::temp_dir().join(format!("eventix_missing_{}.ics", uuid::Uuid::new_v4()));
+        let err = Calendar::import_from_ics(&path).unwrap_err();
+        assert!(
+            matches!(err, EventixError::IcsError(message) if message.contains("Failed to read ICS file"))
+        );
+    }
+
+    #[test]
+    fn test_from_ics_string_skips_bad_event_continues_others() {
+        let ics = "\
+BEGIN:VCALENDAR
+BEGIN:VEVENT
+SUMMARY:Good
+DTSTART:20251101T100000Z
+DTEND:20251101T110000Z
+END:VEVENT
+BEGIN:VEVENT
+SUMMARY:Bad
+END:VEVENT
+END:VCALENDAR";
+
+        let cal = Calendar::from_ics_string(ics).unwrap();
+        assert_eq!(cal.event_count(), 1);
+        assert_eq!(cal.events[0].title, "Good");
+    }
+
+    #[test]
+    fn test_parse_rrule_secondly_from_ics_import() {
+        let ics = "\
+BEGIN:VCALENDAR
+BEGIN:VEVENT
+SUMMARY:Secondly
+DTSTART:20251101T100000Z
+DTEND:20251101T100001Z
+RRULE:FREQ=SECONDLY;COUNT=3
+END:VEVENT
+END:VCALENDAR";
+
+        let cal = Calendar::from_ics_string(ics).unwrap();
+        let ev = &cal.events[0];
+        assert_eq!(ev.recurrence.as_ref().unwrap().frequency(), rrule::Frequency::Secondly);
     }
 }

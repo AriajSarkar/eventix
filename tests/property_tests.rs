@@ -1,8 +1,12 @@
 #![allow(clippy::unwrap_used)]
 
-use chrono::{Duration, TimeZone};
+mod common;
+
+use chrono::{Duration, TimeZone, Weekday};
+use common::parse;
+use eventix::recurrence::RecurrenceFilter;
 use eventix::timezone;
-use eventix::{gap_validation, Calendar, Event, Recurrence};
+use eventix::{gap_validation, Calendar, Event, EventBuilder, EventStatus, Recurrence};
 use proptest::prelude::*;
 
 proptest! {
@@ -161,8 +165,8 @@ proptest! {
         num_events in 0usize..10,
         event_duration_mins in 15i64..60
     ) {
-        // INVARIANT: For NON-OVERLAPPING events, occupancy_percentage is 0.0 <= x <= 100.0
-        // Note: With overlapping events, occupancy CAN exceed 100% (over-booking)
+        // INVARIANT: occupancy_percentage is always 0.0 <= x <= 100.0
+        // (overlapping intervals are merged before summing busy time)
         let mut cal = Calendar::new("Percentage Test");
         let tz = timezone::parse_timezone("UTC").unwrap();
         let base = tz.with_ymd_and_hms(2025, 3, 1, 0, 0, 0).unwrap();
@@ -278,5 +282,126 @@ proptest! {
         prop_assert_eq!(gaps[0].end, end);
         prop_assert_eq!(gaps[0].duration_minutes(), window_hours * 60);
     }
+    #[test]
+    fn test_density_invariant_with_overlapping_events(
+        num_events in 2usize..8,
+        window_hours in 8i64..24
+    ) {
+        // INVARIANT: busy + free = total, even with overlapping events.
+        // This catches the double-counting bug where overlapping intervals
+        // inflated busy_duration beyond total_duration.
+        let mut cal = Calendar::new("Overlap Density");
+        let tz = timezone::parse_timezone("UTC").unwrap();
+        let base = tz.with_ymd_and_hms(2025, 8, 1, 8, 0, 0).unwrap();
+
+        // Create events that WILL overlap: 2-hour events spaced 1 hour apart
+        for i in 0..num_events {
+            let event = Event::builder()
+                .title(format!("Overlap {}", i))
+                .start_datetime(base + Duration::hours(i as i64))
+                .duration_hours(2)
+                .build()
+                .unwrap();
+            cal.add_event(event);
+        }
+
+        let start = base;
+        let end = base + Duration::hours(window_hours);
+        let density = gap_validation::calculate_density(&cal, start, end).unwrap();
+
+        let busy_secs = density.busy_duration.num_seconds();
+        let free_secs = density.free_duration.num_seconds();
+        let total_secs = density.total_duration.num_seconds();
+
+        // Core invariant: busy + free = total
+        prop_assert_eq!(
+            busy_secs + free_secs,
+            total_secs,
+            "busy ({}) + free ({}) should equal total ({})",
+            busy_secs, free_secs, total_secs
+        );
+
+        // free_duration must never be negative
+        prop_assert!(
+            free_secs >= 0,
+            "free_duration must not be negative, got {}",
+            free_secs
+        );
+
+        // occupancy must not exceed 100%
+        prop_assert!(
+            density.occupancy_percentage <= 100.0,
+            "occupancy must not exceed 100%, got {:.2}%",
+            density.occupancy_percentage
+        );
+    }
     // END: Gap Validation Property Tests
+}
+
+#[test]
+fn test_event_builder_bulk_field_setters_and_filters() {
+    let monday = parse("2025-11-03 09:00:00", "UTC");
+    let tuesday = parse("2025-11-04 09:00:00", "UTC");
+    let thursday = parse("2025-11-06 09:00:00", "UTC");
+
+    let event = EventBuilder::default()
+        .title("Covered recurrence")
+        .start_datetime(monday)
+        .duration_hours(1)
+        .attendee("initial@example.com")
+        .attendees(vec!["alice@example.com".to_string(), "bob@example.com".to_string()])
+        .recurrence(Recurrence::daily().count(7))
+        .skip_weekends(true)
+        .exception_dates(vec![tuesday, thursday])
+        .status(EventStatus::Blocked)
+        .build()
+        .unwrap();
+
+    assert_eq!(
+        event.attendees,
+        vec!["alice@example.com".to_string(), "bob@example.com".to_string()]
+    );
+    assert_eq!(event.status, EventStatus::Blocked);
+
+    let occurrences = event
+        .occurrences_between(
+            parse("2025-11-03 00:00:00", "UTC"),
+            parse("2025-11-10 00:00:00", "UTC"),
+            16,
+        )
+        .unwrap();
+
+    assert_eq!(
+        occurrences,
+        vec![monday, parse("2025-11-05 09:00:00", "UTC"), parse("2025-11-07 09:00:00", "UTC"),]
+    );
+}
+
+#[test]
+fn test_recurrence_rrule_and_filter_helpers() {
+    let start = parse("2025-11-03 09:00:00", "UTC");
+    let recurrence = Recurrence::weekly()
+        .interval(2)
+        .count(5)
+        .weekdays(vec![Weekday::Mon, Weekday::Wed]);
+    let until = parse("2025-12-31 09:00:00", "UTC");
+    let yearly = Recurrence::yearly().until(until);
+
+    assert_eq!(recurrence.get_interval(), 2);
+    assert_eq!(recurrence.get_count(), Some(5));
+    assert_eq!(yearly.get_until(), Some(until));
+    assert_eq!(recurrence.get_weekdays().unwrap(), [Weekday::Mon, Weekday::Wed]);
+
+    let rrule = recurrence.to_rrule_string(start).unwrap();
+    assert!(rrule.contains("RRULE:FREQ=WEEKLY;INTERVAL=2;COUNT=5;BYDAY=MON,WED"));
+
+    let filter = RecurrenceFilter::new()
+        .skip_weekends(true)
+        .skip_dates(vec![parse("2025-11-04 09:00:00", "UTC")]);
+    let filtered = filter.filter_occurrences(vec![
+        parse("2025-11-03 09:00:00", "UTC"),
+        parse("2025-11-04 09:00:00", "UTC"),
+        parse("2025-11-08 09:00:00", "UTC"),
+    ]);
+    assert_eq!(filtered, vec![parse("2025-11-03 09:00:00", "UTC")]);
 }
