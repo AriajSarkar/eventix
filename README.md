@@ -191,7 +191,7 @@ window up front and maps cleanly into frontend components. The iterators yield
 `Result<DayView>` / `Result<WeekView>` so expansion errors stay explicit.
 
 ```rust
-use eventix::{Calendar, Event, Recurrence, timezone};
+use eventix::{Calendar, Duration, Event, Recurrence, timezone};
 
 let mut cal = Calendar::new("Personal");
 cal.add_event(
