@@ -186,10 +186,8 @@ fn bench_recurrence_generation(c: &mut Criterion) {
         let take_count = (*count as usize) / 10;
         group.bench_with_input(BenchmarkId::new("lazy_take_10pct", count), count, |b, _| {
             b.iter(|| {
-                let result: Vec<_> = recurrence
-                    .occurrences(black_box(start))
-                    .take(take_count)
-                    .collect();
+                let result: Vec<_> =
+                    recurrence.occurrences(black_box(start)).take(take_count).collect();
                 result
             })
         });
@@ -266,21 +264,17 @@ fn bench_occurrences_between_capped(c: &mut Criterion) {
             .build()
             .unwrap();
 
-        group.bench_with_input(
-            BenchmarkId::new("secondly_100k_cap", cap),
-            cap,
-            |b, &cap| {
-                b.iter(|| {
-                    event
-                        .occurrences_between(
-                            black_box(window_start),
-                            black_box(window_end),
-                            black_box(cap),
-                        )
-                        .unwrap()
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("secondly_100k_cap", cap), cap, |b, &cap| {
+            b.iter(|| {
+                event
+                    .occurrences_between(
+                        black_box(window_start),
+                        black_box(window_end),
+                        black_box(cap),
+                    )
+                    .unwrap()
+            })
+        });
     }
 
     // Minutely — 100K candidates, cap at 10/100
@@ -293,21 +287,17 @@ fn bench_occurrences_between_capped(c: &mut Criterion) {
             .build()
             .unwrap();
 
-        group.bench_with_input(
-            BenchmarkId::new("minutely_100k_cap", cap),
-            cap,
-            |b, &cap| {
-                b.iter(|| {
-                    event
-                        .occurrences_between(
-                            black_box(window_start),
-                            black_box(window_end),
-                            black_box(cap),
-                        )
-                        .unwrap()
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("minutely_100k_cap", cap), cap, |b, &cap| {
+            b.iter(|| {
+                event
+                    .occurrences_between(
+                        black_box(window_start),
+                        black_box(window_end),
+                        black_box(cap),
+                    )
+                    .unwrap()
+            })
+        });
     }
 
     // Hourly with weekend filter — 50K candidates, cap at 20
@@ -581,20 +571,16 @@ fn bench_is_slot_available(c: &mut Criterion) {
             timezone::parse_datetime_with_tz("2025-01-01 02:30:00", tz).unwrap();
         let slot_end_conflict = slot_start_conflict + Duration::hours(1);
 
-        group.bench_with_input(
-            BenchmarkId::new("check_available_gap", size),
-            size,
-            |b, _| {
-                b.iter(|| {
-                    gap_validation::is_slot_available(
-                        black_box(&cal),
-                        black_box(slot_start_gap),
-                        black_box(slot_end_gap),
-                    )
-                    .unwrap()
-                })
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("check_available_gap", size), size, |b, _| {
+            b.iter(|| {
+                gap_validation::is_slot_available(
+                    black_box(&cal),
+                    black_box(slot_start_gap),
+                    black_box(slot_end_gap),
+                )
+                .unwrap()
+            })
+        });
 
         group.bench_with_input(BenchmarkId::new("check_conflict", size), size, |b, _| {
             b.iter(|| {

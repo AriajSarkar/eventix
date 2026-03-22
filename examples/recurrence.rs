@@ -111,10 +111,7 @@ fn main() -> anyhow::Result<()> {
     let nov_end = timezone::parse_datetime_with_tz("2025-11-30 23:59:59", tz)?;
 
     let all_occurrences = cal.events_between(nov_start, nov_end)?;
-    println!(
-        "Total occurrences in November 2025: {}",
-        all_occurrences.len()
-    );
+    println!("Total occurrences in November 2025: {}", all_occurrences.len());
 
     // Display events by date
     println!("\n=== Events on November 5, 2025 ===");
@@ -122,11 +119,7 @@ fn main() -> anyhow::Result<()> {
     let events_on_date = cal.events_on_date(specific_date)?;
 
     for occurrence in events_on_date {
-        println!(
-            "  - {} at {}",
-            occurrence.title(),
-            occurrence.occurrence_time.format("%H:%M")
-        );
+        println!("  - {} at {}", occurrence.title(), occurrence.occurrence_time.format("%H:%M"));
     }
 
     Ok(())

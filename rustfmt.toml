@@ -1,14 +1,26 @@
-# eventix Rustfmt Configuration
+# eventix — rustfmt (stable `cargo fmt` compatible)
+# Run: cargo fmt --all
 
-# Edition
 edition = "2021"
 
-# Formatting
+# Primary line length.
 max_width = 100
+# Break method / builder chains sooner (sub-limit of max_width).
+chain_width = 80
+
+# "Off" = stricter wrapping at max_width (fewer very long lines than "Default").
+use_small_heuristics = "Off"
+
 hard_tabs = false
 tab_spaces = 4
 newline_style = "Auto"
 
-# Misc
 reorder_imports = true
 reorder_modules = true
+
+# --- Nightly rustfmt only (ignored on stable; use `cargo +nightly fmt --all`) ---
+# imports_granularity = "Module"
+# group_imports = "StdExternalCrate"
+# wrap_comments = true
+# comment_width = 80
+# format_code_in_doc_comments = true
