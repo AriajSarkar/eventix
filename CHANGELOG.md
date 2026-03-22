@@ -5,18 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-03-18
+## [0.5.0] - 2026-03-23
 
 ### Added
 - **Calendar view iterators**: `Calendar::days()`, `days_back()`, `weeks()`, and `weeks_back()` provide lazy day/week traversal for UI-oriented calendar rendering.
 - **Owned day/week view models**: Added `DayView`, `WeekView`, and `OwnedEventOccurrence` so iterator output can be collected and moved independently of the source `Calendar`.
 - **Calendar views example**: Added `examples/calendar_views.rs` to demonstrate day/week traversal and UI-friendly mapping patterns.
+- Integration tests: shared `tests/common` helpers (`parse`); coverage-focused cases distributed across `calendar_view_tests`, `timezone_ics_tests`, `gap_validation_tests`, `property_tests`, and `booking_status_tests`.
+- Unit tests: ICS path round-trip and parse edge cases; timezone `local_day_window` (spring-forward) and `convert_timezone`; calendar JSON (malformed input, calendar-level timezone round-trip).
 
 ### Changed
 - **[BREAKING] Fallible view iteration**: `DayIterator` and `WeekIterator` now yield `Result<DayView>` / `Result<WeekView>` items instead of silently stopping on expansion errors.
 - **Week back-navigation**: `WeekIterator::backward()` now yields proper contiguous Monday-Sunday blocks when walking into the past.
 - **[BREAKING] Explicit day boundaries**: `DayView::end()` now returns the exclusive next-midnight boundary, with `end_inclusive()` available for display-only scenarios.
 - **[BREAKING]** `Calendar::events_on_date()` and `Event::occurs_on()` now use an exclusive next-day boundary, improving correctness for occurrences that start exactly at midnight boundaries and for DST-length days.
+- `Calendar::to_json`: serialization failures are returned as `EventixError::Other` instead of panicking.
+- `local_day_window`: validation errors now say “Failed to resolve start/end time” (clearer than “Ambiguous”).
+- `rustfmt.toml`: stricter line breaking (`use_small_heuristics = "Off"`, `chain_width`).
+
+### Fixed
+- `expand_weekdays_in_month`: advance with `succ_opt()` without panicking on unexpected `None`.
+- README: calendar view iterator example imports `Duration`.
+
+### Documentation
+- `Calendar::from_json`: documented that an invalid top-level `"timezone"` string is ignored (lenient import); event-level timezones must still parse.
 
 ## [0.4.0] - 2026-03-07
 
